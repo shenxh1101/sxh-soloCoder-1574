@@ -10,6 +10,8 @@ export interface Medicine {
   updatedAt: string;
 }
 
+export type BatchStatus = 'normal' | 'off_shelf' | 'returning' | 'discount';
+
 export interface MedicineBatch {
   id: string;
   medicineId: string;
@@ -18,6 +20,7 @@ export interface MedicineBatch {
   expiryDate: string;
   quantity: number;
   costPrice: number;
+  status: BatchStatus;
   createdAt: string;
 }
 
@@ -50,8 +53,62 @@ export interface StockRecord {
   batchId?: string;
   quantity: number;
   costPrice: number;
-  type: 'in' | 'out';
+  type: 'in' | 'out' | 'adjust';
   operationTime: string;
+  remark?: string;
+  checkId?: string;
+  orderId?: string;
+}
+
+export interface StockCheckItem {
+  id: string;
+  checkId: string;
+  medicineId: string;
+  batchId: string;
+  systemQuantity: number;
+  actualQuantity: number;
+  difference: number;
+  costPrice: number;
+}
+
+export type StockCheckStatus = 'draft' | 'confirmed';
+
+export interface StockCheck {
+  id: string;
+  checkNo: string;
+  title: string;
+  status: StockCheckStatus;
+  totalDifference: number;
+  totalDiffAmount: number;
+  items: StockCheckItem[];
+  createdAt: string;
+  confirmedAt?: string;
+  remark?: string;
+}
+
+export type OrderStatus = 'pending' | 'partial' | 'received' | 'cancelled';
+
+export interface OrderItem {
+  id: string;
+  orderId: string;
+  medicineId: string;
+  suggestedQuantity: number;
+  orderedQuantity: number;
+  receivedQuantity: number;
+  costPrice: number;
+  remark?: string;
+}
+
+export interface OrderRecord {
+  id: string;
+  orderNo: string;
+  supplierId: string;
+  status: OrderStatus;
+  items: OrderItem[];
+  totalQuantity: number;
+  totalAmount: number;
+  createdAt: string;
+  expectedDate?: string;
   remark?: string;
 }
 

@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useState, useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import {
   AlertTriangle,
@@ -13,8 +13,10 @@ import {
   Pill,
   Phone,
   ListChecks,
+  Layers,
 } from 'lucide-react';
 import { useAppStore } from '@/store';
+import type { BatchStatus } from '@/types';
 import {
   getDaysUntilExpiry,
   getExpiryStatus,
@@ -27,9 +29,38 @@ import {
   isToday,
 } from '@/utils';
 
+const BATCH_STATUS_TABS: { value: BatchStatus | 'all'; label: string }[] = [
+  { value: 'all', label: '全部' },
+  { value: 'normal', label: '正常' },
+  { value: 'discount', label: '折价处理' },
+  { value: 'off_shelf', label: '已下架' },
+  { value: 'returning', label: '退货中' },
+];
+
+const getBatchStatusColor = (status: BatchStatus): string => {
+  const colorMap: Record<BatchStatus, string> = {
+    normal: 'text-emerald-600 bg-emerald-50 border-emerald-200',
+    off_shelf: 'text-slate-500 bg-slate-100 border-slate-200',
+    returning: 'text-orange-600 bg-orange-50 border-orange-200',
+    discount: 'text-violet-600 bg-violet-50 border-violet-200',
+  };
+  return colorMap[status];
+};
+
+const getBatchStatusText = (status: BatchStatus): string => {
+  const textMap: Record<BatchStatus, string> = {
+    normal: '正常',
+    off_shelf: '已下架',
+    returning: '退货中',
+    discount: '折价处理',
+  };
+  return textMap[status];
+};
+
 export function Dashboard() {
   const { medicines, batches, saleRecords, suppliers, getMedicineStock, getReplenishmentList } =
     useAppStore();
+  const [expiryFilterStatus, setExpiryFilterStatus] = useState<BatchStatus | 'all'>('all');
 
   const expiryStats = useMemo(() => {
     let expired = 0;
@@ -89,6 +120,30 @@ export function Dashboard() {
     return { totalAmount, totalProfit, totalQuantity, count: todayRecords.length };
   }, [saleRecords]);
 
+  const batchStatusStats = useMemo(() => {
+    let normal = 0;
+    let discount = 0;
+    let offShelf = 0;
+    let returning = 0;
+    const total = batches.length;
+
+    batches.forEach((batch) => {
+      if (batch.status === 'normal') normal++;
+      else if (batch.status === 'discount') discount++;
+      else if (batch.status === 'off_shelf') offShelf++;
+      else if (batch.status === 'returning') returning++;
+    });
+
+    return { total, normal, discount, offShelf, returning };
+  }, [batches]);
+
+  const filteredExpiringBatches = useMemo(() => {
+    if (expiryFilterStatus === 'all') {
+      return expiryStats.expiringBatches;
+    }
+    return expiryStats.expiringBatches.filter((b) => b.status === expiryFilterStatus);
+  }, [expiryStats.expiringBatches, expiryFilterStatus]);
+
   const replenishmentList = useMemo(() => getReplenishmentList(), [getReplenishmentList]);
 
   const getMedicineName = (medicineId: string) => {
@@ -125,7 +180,7 @@ export function Dashboard() {
         </div>
       </div>
 
-      <div className="grid grid-cols-4 gap-5">
+      <div className="grid grid-cols-5 gap-5">
         <div className="bg-white rounded-2xl p-5 border border-slate-100 shadow-sm">
           <div className="flex items-center justify-between">
             <div className="w-12 h-12 bg-rose-50 rounded-xl flex items-center justify-center">
@@ -217,45 +272,104 @@ export function Dashboard() {
             %
           </p>
         </div>
+
+        <div className="bg-white rounded-2xl p-5 border border-slate-100 shadow-sm">
+          <div className="flex items-center justify-between">
+            <div className="w-12 h-12 bg-violet-50 rounded-xl flex items-center justify-center">
+              <Layers className="w-6 h-6 text-violet-500" />
+            </div>
+            <span className="text-xs font-medium text-violet-600 bg-violet-50 px-2 py-1 rounded-full">
+              {batchStatusStats.total} 批
+            </span>
+          </div>
+          <div className="mt-4">
+            <p className="text-sm text-slate-500">批次状态</p>
+            <p className="text-2xl font-bold text-slate-800 mt-1">
+              {batchStatusStats.total}
+            </p>
+          </div>
+          <div className="mt-3 space-y-2">
+            <div className="flex items-center justify-between text-xs">
+              <span className="text-slate-500">正常</span>
+              <span className="font-medium text-emerald-600">{batchStatusStats.normal}</span>
+            </div>
+            <div className="flex items-center justify-between text-xs">
+              <span className="text-slate-500">折价处理</span>
+              <span className="font-medium text-violet-600">{batchStatusStats.discount}</span>
+            </div>
+            <div className="flex items-center justify-between text-xs">
+              <span className="text-slate-500">已下架</span>
+              <span className="font-medium text-slate-500">{batchStatusStats.offShelf}</span>
+            </div>
+            <div className="flex items-center justify-between text-xs">
+              <span className="text-slate-500">退货中</span>
+              <span className="font-medium text-orange-600">{batchStatusStats.returning}</span>
+            </div>
+          </div>
+        </div>
       </div>
 
       <div className="grid grid-cols-3 gap-5">
         <div className="col-span-2 bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
-          <div className="p-5 border-b border-slate-100 flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              <div className="w-9 h-9 bg-rose-50 rounded-lg flex items-center justify-center">
-                <Clock className="w-5 h-5 text-rose-500" />
+          <div className="p-5 border-b border-slate-100">
+            <div className="flex items-center justify-between mb-4">
+              <div className="flex items-center gap-3">
+                <div className="w-9 h-9 bg-rose-50 rounded-lg flex items-center justify-center">
+                  <Clock className="w-5 h-5 text-rose-500" />
+                </div>
+                <div>
+                  <h3 className="font-semibold text-slate-800">即将过期批次</h3>
+                  <p className="text-xs text-slate-500">按批次精确追踪有效期</p>
+                </div>
               </div>
-              <div>
-                <h3 className="font-semibold text-slate-800">即将过期批次</h3>
-                <p className="text-xs text-slate-500">按批次精确追踪有效期</p>
-              </div>
+              <Link
+                to="/medicines"
+                className="text-sm text-emerald-600 hover:text-emerald-700 font-medium inline-flex items-center gap-1"
+              >
+                查看全部
+                <ArrowRight className="w-4 h-4" />
+              </Link>
             </div>
-            <Link
-              to="/medicines"
-              className="text-sm text-emerald-600 hover:text-emerald-700 font-medium inline-flex items-center gap-1"
-            >
-              查看全部
-              <ArrowRight className="w-4 h-4" />
-            </Link>
+            <div className="flex gap-1">
+              {BATCH_STATUS_TABS.map((tab) => (
+                <button
+                  key={tab.value}
+                  onClick={() => setExpiryFilterStatus(tab.value)}
+                  className={`px-3 py-1.5 text-xs font-medium rounded-lg transition-colors ${
+                    expiryFilterStatus === tab.value
+                      ? 'bg-emerald-500 text-white'
+                      : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                  }`}
+                >
+                  {tab.label}
+                </button>
+              ))}
+            </div>
           </div>
           <div className="p-5">
-            {expiryStats.expiringBatches.length === 0 ? (
+            {filteredExpiringBatches.length === 0 ? (
               <div className="text-center py-10">
                 <div className="w-16 h-16 bg-emerald-50 rounded-full flex items-center justify-center mx-auto mb-3">
                   <Clock className="w-8 h-8 text-emerald-500" />
                 </div>
-                <p className="text-slate-500">所有批次都在有效期内 🎉</p>
+                <p className="text-slate-500">该状态下暂无临期批次 🎉</p>
               </div>
             ) : (
               <div className="space-y-3">
-                {expiryStats.expiringBatches.slice(0, 5).map((batch) => {
+                {filteredExpiringBatches.slice(0, 5).map((batch) => {
                   const days = getDaysUntilExpiry(batch.expiryDate);
                   const status = getExpiryStatus(days);
+                  const isGreyed =
+                    expiryFilterStatus === 'all' &&
+                    (batch.status === 'off_shelf' || batch.status === 'returning');
                   return (
                     <div
                       key={batch.id}
-                      className="flex items-center justify-between p-3 bg-slate-50 rounded-xl hover:bg-slate-100 transition-colors"
+                      className={`flex items-center justify-between p-3 rounded-xl transition-colors ${
+                        isGreyed
+                          ? 'bg-slate-50/50 opacity-60'
+                          : 'bg-slate-50 hover:bg-slate-100'
+                      }`}
                     >
                       <div className="flex items-center gap-3">
                         <div className="w-10 h-10 bg-white rounded-lg flex items-center justify-center shadow-sm">
@@ -271,13 +385,22 @@ export function Dashboard() {
                         </div>
                       </div>
                       <div className="text-right">
-                        <span
-                          className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium border ${getExpiryStatusColor(
-                            status
-                          )}`}
-                        >
-                          {getExpiryStatusText(status)}
-                        </span>
+                        <div className="flex items-center gap-2 justify-end">
+                          <span
+                            className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium border ${getExpiryStatusColor(
+                              status
+                            )}`}
+                          >
+                            {getExpiryStatusText(status)}
+                          </span>
+                          <span
+                            className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium border ${getBatchStatusColor(
+                              batch.status
+                            )}`}
+                          >
+                            {getBatchStatusText(batch.status)}
+                          </span>
+                        </div>
                         <p className="text-xs text-slate-500 mt-1">
                           {days !== null
                             ? days > 0

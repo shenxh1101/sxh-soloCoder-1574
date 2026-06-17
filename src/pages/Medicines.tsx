@@ -10,12 +10,13 @@ import {
   Calendar,
   CalendarClock,
   Layers,
+  MoreHorizontal,
 } from 'lucide-react';
 import { useAppStore } from '@/store';
 import { Modal } from '@/components/Modal';
 import { useToast } from '@/components/Toast';
 import { MEDICINE_CATEGORIES } from '@/types';
-import type { Medicine, MedicineBatch } from '@/types';
+import type { Medicine, MedicineBatch, BatchStatus } from '@/types';
 import {
   getDaysUntilExpiry,
   getExpiryStatus,
@@ -38,6 +39,7 @@ export function Medicines() {
     getMedicineStock,
     getMedicineCostPrice,
     addBatch,
+    updateBatchStatus,
   } = useAppStore();
   const toast = useToast();
 
@@ -199,6 +201,34 @@ export function Medicines() {
 
   const getMedicineBatches = (medicineId: string): MedicineBatch[] => {
     return sortBatchesByExpiry(batches.filter((b) => b.medicineId === medicineId));
+  };
+
+  const getBatchStatusText = (status: BatchStatus): string => {
+    const map: Record<BatchStatus, string> = {
+      normal: '正常',
+      off_shelf: '已下架',
+      returning: '退货中',
+      discount: '折价处理',
+    };
+    return map[status];
+  };
+
+  const getBatchStatusColor = (status: BatchStatus): string => {
+    const map: Record<BatchStatus, string> = {
+      normal: 'bg-emerald-50 text-emerald-600 border-emerald-200',
+      off_shelf: 'bg-slate-100 text-slate-500 border-slate-200',
+      returning: 'bg-amber-50 text-amber-600 border-amber-200',
+      discount: 'bg-purple-50 text-purple-600 border-purple-200',
+    };
+    return map[status];
+  };
+
+  const [statusMenuBatch, setStatusMenuBatch] = useState<string | null>(null);
+
+  const handleUpdateBatchStatus = (batchId: string, status: BatchStatus) => {
+    updateBatchStatus(batchId, status);
+    setStatusMenuBatch(null);
+    toast.success('批次状态已更新');
   };
 
   const getEarliestExpiry = (medicineId: string) => {
@@ -411,6 +441,13 @@ export function Medicines() {
                                 <span className="text-xs font-mono text-slate-500 bg-slate-100 px-2 py-1 rounded">
                                   {batch.batchNo}
                                 </span>
+                                <span
+                                  className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium border ${getBatchStatusColor(
+                                    batch.status
+                                  )}`}
+                                >
+                                  {getBatchStatusText(batch.status)}
+                                </span>
                                 <div className="flex items-center gap-1 text-xs text-slate-600">
                                   <Calendar className="w-3.5 h-3.5 text-slate-400" />
                                   生产: {formatDate(batch.productionDate)}
@@ -420,7 +457,7 @@ export function Medicines() {
                                   有效期: {formatDate(batch.expiryDate)}
                                 </div>
                               </div>
-                              <div className="flex items-center gap-6">
+                              <div className="flex items-center gap-4">
                                 <div className="text-right">
                                   <span className="text-sm font-medium text-slate-700">
                                     {batch.quantity} 盒
@@ -444,6 +481,73 @@ export function Medicines() {
                                     )}
                                   </span>
                                 )}
+                                <div className="relative">
+                                  <button
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      setStatusMenuBatch(
+                                        statusMenuBatch === batch.id
+                                          ? null
+                                          : batch.id
+                                      );
+                                    }}
+                                    className="p-1.5 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-lg transition-colors"
+                                  >
+                                    <MoreHorizontal className="w-4 h-4" />
+                                  </button>
+                                  {statusMenuBatch === batch.id && (
+                                    <div className="absolute right-0 top-full mt-1 bg-white rounded-lg shadow-lg border border-slate-200 py-1 z-10 min-w-[120px]">
+                                      <button
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          handleUpdateBatchStatus(
+                                            batch.id,
+                                            'normal'
+                                          );
+                                        }}
+                                        className="w-full text-left px-3 py-2 text-xs text-slate-600 hover:bg-slate-50"
+                                      >
+                                        设为正常
+                                      </button>
+                                      <button
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          handleUpdateBatchStatus(
+                                            batch.id,
+                                            'discount'
+                                          );
+                                        }}
+                                        className="w-full text-left px-3 py-2 text-xs text-purple-600 hover:bg-purple-50"
+                                      >
+                                        折价处理
+                                      </button>
+                                      <button
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          handleUpdateBatchStatus(
+                                            batch.id,
+                                            'returning'
+                                          );
+                                        }}
+                                        className="w-full text-left px-3 py-2 text-xs text-amber-600 hover:bg-amber-50"
+                                      >
+                                        退货中
+                                      </button>
+                                      <button
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          handleUpdateBatchStatus(
+                                            batch.id,
+                                            'off_shelf'
+                                          );
+                                        }}
+                                        className="w-full text-left px-3 py-2 text-xs text-slate-500 hover:bg-slate-50"
+                                      >
+                                        已下架
+                                      </button>
+                                    </div>
+                                  )}
+                                </div>
                               </div>
                             </div>
                           ))}

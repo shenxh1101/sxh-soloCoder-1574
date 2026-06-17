@@ -7,8 +7,12 @@ import {
   Trophy,
   BarChart3,
   Layers,
+  Calendar,
+  Tag,
+  Building2,
 } from 'lucide-react';
 import { useAppStore } from '@/store';
+import { MEDICINE_CATEGORIES } from '@/types';
 import {
   formatCurrency,
   formatDate,
@@ -25,16 +29,50 @@ import {
 } from 'recharts';
 
 export function Sales() {
-  const { medicines, saleRecords, batches } = useAppStore();
+  const { medicines, saleRecords, batches, suppliers } = useAppStore();
 
   const [range, setRange] = useState<'7d' | '30d' | 'all'>('30d');
+  const [startDate, setStartDate] = useState<string>('');
+  const [endDate, setEndDate] = useState<string>('');
+  const [selectedCategory, setSelectedCategory] = useState<string>('all');
+  const [selectedSupplier, setSelectedSupplier] = useState<string>('all');
 
   const filteredSales = useMemo(() => {
-    const now = new Date();
-    const days = range === '7d' ? 7 : range === '30d' ? 30 : 36500;
-    const startDate = new Date(now.getTime() - days * 24 * 60 * 60 * 1000);
-    return saleRecords.filter((s) => new Date(s.saleTime) >= startDate);
-  }, [saleRecords, range]);
+    let result = [...saleRecords];
+
+    if (startDate) {
+      const start = new Date(startDate);
+      start.setHours(0, 0, 0, 0);
+      result = result.filter((s) => new Date(s.saleTime) >= start);
+    } else {
+      const now = new Date();
+      const days = range === '7d' ? 7 : range === '30d' ? 30 : 36500;
+      const start = new Date(now.getTime() - days * 24 * 60 * 60 * 1000);
+      result = result.filter((s) => new Date(s.saleTime) >= start);
+    }
+
+    if (endDate) {
+      const end = new Date(endDate);
+      end.setHours(23, 59, 59, 999);
+      result = result.filter((s) => new Date(s.saleTime) <= end);
+    }
+
+    if (selectedCategory !== 'all') {
+      result = result.filter((s) => {
+        const med = medicines.find((m) => m.id === s.medicineId);
+        return med?.category === selectedCategory;
+      });
+    }
+
+    if (selectedSupplier !== 'all') {
+      result = result.filter((s) => {
+        const med = medicines.find((m) => m.id === s.medicineId);
+        return med?.supplierId === selectedSupplier;
+      });
+    }
+
+    return result;
+  }, [saleRecords, range, startDate, endDate, selectedCategory, selectedSupplier, medicines]);
 
   const stats = useMemo(() => {
     const totalRevenue = filteredSales.reduce(
@@ -107,15 +145,48 @@ export function Sales() {
     return Array.from(map.values()).sort((a, b) => a.date.localeCompare(b.date));
   }, [filteredSales]);
 
+  const categoryStats = useMemo(() => {
+    const map = new Map<
+      string,
+      {
+        category: string;
+        quantity: number;
+        freeQuantity: number;
+        revenue: number;
+        profit: number;
+      }
+    >();
+
+    filteredSales.forEach((sale) => {
+      const med = medicines.find((m) => m.id === sale.medicineId);
+      if (!med) return;
+      const category = med.category;
+      const existing = map.get(category) || {
+        category,
+        quantity: 0,
+        freeQuantity: 0,
+        revenue: 0,
+        profit: 0,
+      };
+      existing.quantity += sale.quantity;
+      existing.freeQuantity += sale.freeQuantity || 0;
+      existing.revenue += sale.totalAmount;
+      existing.profit += sale.profit || 0;
+      map.set(category, existing);
+    });
+
+    return Array.from(map.values()).sort((a, b) => b.revenue - a.revenue);
+  }, [filteredSales, medicines]);
+
   const recentSales = useMemo(
     () =>
-      [...saleRecords]
+      [...filteredSales]
         .sort(
           (a, b) =>
             new Date(b.saleTime).getTime() - new Date(a.saleTime).getTime()
         )
         .slice(0, 20),
-    [saleRecords]
+    [filteredSales]
   );
 
   const getMedicineName = (id: string) =>
@@ -139,9 +210,13 @@ export function Sales() {
           {(['7d', '30d', 'all'] as const).map((r) => (
             <button
               key={r}
-              onClick={() => setRange(r)}
+              onClick={() => {
+                setRange(r);
+                setStartDate('');
+                setEndDate('');
+              }}
               className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${
-                range === r
+                range === r && !startDate && !endDate
                   ? 'bg-white text-emerald-600 shadow-sm'
                   : 'text-slate-500 hover:text-slate-700'
               }`}
@@ -149,6 +224,83 @@ export function Sales() {
               {r === '7d' ? '近7天' : r === '30d' ? '近30天' : '全部'}
             </button>
           ))}
+        </div>
+      </div>
+
+      <div className="bg-white rounded-2xl p-5 border border-slate-100 shadow-sm">
+        <div className="flex flex-wrap items-center gap-4">
+          <div className="flex items-center gap-2">
+            <Calendar className="w-4 h-4 text-slate-400" />
+            <span className="text-sm text-slate-600 font-medium">日期范围</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <input
+              type="date"
+              value={startDate}
+              onChange={(e) => setStartDate(e.target.value)}
+              className="px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent"
+            />
+            <span className="text-slate-400">至</span>
+            <input
+              type="date"
+              value={endDate}
+              onChange={(e) => setEndDate(e.target.value)}
+              className="px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent"
+            />
+          </div>
+
+          <div className="w-px h-8 bg-slate-200" />
+
+          <div className="flex items-center gap-2">
+            <Tag className="w-4 h-4 text-slate-400" />
+            <span className="text-sm text-slate-600 font-medium">药品分类</span>
+            <select
+              value={selectedCategory}
+              onChange={(e) => setSelectedCategory(e.target.value)}
+              className="px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent bg-white"
+            >
+              <option value="all">全部</option>
+              {MEDICINE_CATEGORIES.map((cat) => (
+                <option key={cat} value={cat}>
+                  {cat}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div className="w-px h-8 bg-slate-200" />
+
+          <div className="flex items-center gap-2">
+            <Building2 className="w-4 h-4 text-slate-400" />
+            <span className="text-sm text-slate-600 font-medium">供货商</span>
+            <select
+              value={selectedSupplier}
+              onChange={(e) => setSelectedSupplier(e.target.value)}
+              className="px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent bg-white"
+            >
+              <option value="all">全部</option>
+              {suppliers.map((sup) => (
+                <option key={sup.id} value={sup.id}>
+                  {sup.name}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {(startDate || endDate || selectedCategory !== 'all' || selectedSupplier !== 'all') && (
+            <button
+              onClick={() => {
+                setStartDate('');
+                setEndDate('');
+                setSelectedCategory('all');
+                setSelectedSupplier('all');
+                setRange('30d');
+              }}
+              className="ml-auto text-sm text-slate-500 hover:text-emerald-600 transition-colors"
+            >
+              重置筛选
+            </button>
+          )}
         </div>
       </div>
 
@@ -215,6 +367,64 @@ export function Sales() {
             </div>
           </div>
         </div>
+      </div>
+
+      <div className="bg-white rounded-2xl p-5 border border-slate-100 shadow-sm">
+        <h2 className="font-semibold text-slate-800 mb-4">分类统计</h2>
+        {categoryStats.length === 0 ? (
+          <p className="text-center py-8 text-slate-400 text-sm">
+            暂无数据
+          </p>
+        ) : (
+          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+            {categoryStats.map((item) => (
+              <div
+                key={item.category}
+                className="p-4 rounded-xl bg-gradient-to-br from-slate-50 to-slate-100/50 border border-slate-100"
+              >
+                <div className="flex items-center gap-2 mb-3">
+                  <div className="w-8 h-8 bg-emerald-100 rounded-lg flex items-center justify-center">
+                    <Tag className="w-4 h-4 text-emerald-600" />
+                  </div>
+                  <span className="font-semibold text-slate-800 text-sm">
+                    {item.category}
+                  </span>
+                </div>
+                <div className="space-y-2">
+                  <div className="flex justify-between items-center">
+                    <span className="text-xs text-slate-500">销售盒数</span>
+                    <span className="text-sm font-semibold text-slate-800">
+                      {item.quantity + item.freeQuantity}
+                      {item.freeQuantity > 0 && (
+                        <span className="text-[10px] text-violet-500 ml-1">
+                          赠{item.freeQuantity}
+                        </span>
+                      )}
+                    </span>
+                  </div>
+                  <div className="flex justify-between items-center">
+                    <span className="text-xs text-slate-500">实收金额</span>
+                    <span className="text-sm font-semibold text-emerald-600">
+                      {formatCurrency(item.revenue)}
+                    </span>
+                  </div>
+                  <div className="flex justify-between items-center">
+                    <span className="text-xs text-slate-500">毛利</span>
+                    <span className="text-sm font-semibold text-sky-600">
+                      {formatCurrency(item.profit)}
+                    </span>
+                  </div>
+                  <div className="flex justify-between items-center">
+                    <span className="text-xs text-slate-500">赠品盒数</span>
+                    <span className="text-sm font-semibold text-violet-600">
+                      {item.freeQuantity}
+                    </span>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
       <div className="bg-white rounded-2xl p-5 border border-slate-100 shadow-sm">
