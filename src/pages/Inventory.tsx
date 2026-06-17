@@ -64,8 +64,11 @@ export function Inventory() {
     getActivePromotion,
     updateBatchStatus,
     createStockCheck,
+    updateStockCheck,
+    deleteStockCheck,
     confirmStockCheck,
     getStockChecks,
+    getOrders,
   } = useAppStore();
   const toast = useToast();
 
@@ -311,28 +314,68 @@ export function Inventory() {
       return;
     }
 
-    const items = checkForm.items
-      .filter((item) => item.actualQuantity.trim() !== '')
-      .map((item) => ({
+    const validItems: {
+      medicineId: string;
+      batchId: string;
+      actualQuantity: number;
+    }[] = [];
+    let hasError = false;
+
+    for (let i = 0; i < checkForm.items.length; i++) {
+      const item = checkForm.items[i];
+      const raw = item.actualQuantity.trim();
+
+      if (raw === '') {
+        hasError = true;
+        toast.error(`第 ${i + 1} 行实盘数量不能为空`);
+        break;
+      }
+      if (!/^\d+$/.test(raw)) {
+        hasError = true;
+        toast.error(`第 ${i + 1} 行实盘数量必须是非负整数`);
+        break;
+      }
+      const qty = parseInt(raw, 10);
+      if (qty < 0) {
+        hasError = true;
+        toast.error(`第 ${i + 1} 行实盘数量不能为负数`);
+        break;
+      }
+      validItems.push({
         medicineId: item.medicineId,
         batchId: item.batchId,
-        actualQuantity: parseInt(item.actualQuantity) || 0,
-      }));
+        actualQuantity: qty,
+      });
+    }
+    if (hasError) return;
 
-    if (items.length === 0) {
+    if (validItems.length === 0) {
       toast.error('请至少填写一个批次的实盘数量');
       return;
     }
 
-    const checkId = createStockCheck({
-      title: checkForm.title.trim(),
-      items,
-      remark: checkForm.remark.trim() || undefined,
-    });
-
-    if (checkId) {
-      toast.success('盘点单已保存');
-      setIsCheckModalOpen(false);
+    if (editingCheck) {
+      const ok = updateStockCheck(editingCheck.id, {
+        title: checkForm.title.trim(),
+        items: validItems,
+        remark: checkForm.remark.trim() || undefined,
+      });
+      if (ok) {
+        toast.success('盘点单已更新');
+        setIsCheckModalOpen(false);
+      } else {
+        toast.error('更新失败，请重试');
+      }
+    } else {
+      const checkId = createStockCheck({
+        title: checkForm.title.trim(),
+        items: validItems,
+        remark: checkForm.remark.trim() || undefined,
+      });
+      if (checkId) {
+        toast.success('盘点单已保存');
+        setIsCheckModalOpen(false);
+      }
     }
   };
 
@@ -360,7 +403,12 @@ export function Inventory() {
   };
 
   const handleDeleteCheck = (checkId: string) => {
-    toast.error('删除功能暂未实现');
+    const ok = deleteStockCheck(checkId);
+    if (ok) {
+      toast.success('盘点单已删除');
+    } else {
+      toast.error('删除失败，已确认的盘点单不能删除');
+    }
   };
 
   const getStockStatusColor = (medicine: Medicine) => {
@@ -929,17 +977,17 @@ export function Inventory() {
                             <span className={typeInfo.color}>{typeInfo.label}</span>
                             {record.batchId && (
                               <span className="text-[10px] text-slate-400 font-mono bg-slate-100 px-1.5 py-0.5 rounded">
-                                {record.batchId.slice(-6)}
+                                {batches.find((b) => b.id === record.batchId)?.batchNo || '-'}
                               </span>
                             )}
                             {record.checkId && (
                               <span className="text-[10px] text-amber-600 font-mono bg-amber-50 px-1.5 py-0.5 rounded">
-                                关联单据：CK{record.checkId.slice(-4)}
+                                关联单据：{getStockChecks().find((c) => c.id === record.checkId)?.checkNo || '-'}
                               </span>
                             )}
                             {record.orderId && (
                               <span className="text-[10px] text-sky-600 font-mono bg-sky-50 px-1.5 py-0.5 rounded">
-                                关联订单：OR{record.orderId.slice(-4)}
+                                关联订单：{getOrders().find((o) => o.id === record.orderId)?.orderNo || '-'}
                               </span>
                             )}
                             {record.type === 'in' && record.costPrice > 0 && (
@@ -1482,7 +1530,7 @@ export function Inventory() {
                           </td>
                           <td className="px-4 py-2.5">
                             <span className="text-xs font-mono text-slate-500 bg-slate-100 px-2 py-0.5 rounded">
-                              {item.batchId ? `B${item.batchId.slice(-6)}` : '-'}
+                              {batches.find((b) => b.id === item.batchId)?.batchNo || '-'}
                             </span>
                           </td>
                           <td className="px-4 py-2.5 text-right">

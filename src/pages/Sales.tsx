@@ -194,7 +194,7 @@ export function Sales() {
 
   const getBatchNo = (batchId?: string) => {
     if (!batchId) return '-';
-    return batches.find((b) => b.id === batchId)?.batchNo || batchId.slice(-6);
+    return batches.find((b) => b.id === batchId)?.batchNo || '-';
   };
 
   const maxBarQty = topByQuantity.length > 0 ? topByQuantity[0].quantity : 1;
