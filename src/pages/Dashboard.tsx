@@ -11,6 +11,8 @@ import {
   ShoppingCart,
   PackagePlus,
   Pill,
+  Phone,
+  ListChecks,
 } from 'lucide-react';
 import { useAppStore } from '@/store';
 import {
@@ -26,31 +28,36 @@ import {
 } from '@/utils';
 
 export function Dashboard() {
-  const { medicines, saleRecords, suppliers } = useAppStore();
+  const { medicines, batches, saleRecords, suppliers, getMedicineStock, getReplenishmentList } =
+    useAppStore();
 
   const expiryStats = useMemo(() => {
     let expired = 0;
     let urgent = 0;
     let warning = 0;
-    const expiringMedicines: typeof medicines = [];
+    const expiringBatches: typeof batches = [];
 
-    medicines.forEach((med) => {
-      const days = getDaysUntilExpiry(med.expiryDate);
-      const status = getExpiryStatus(days);
-      if (status !== 'normal') {
-        expiringMedicines.push(med);
-      }
-      if (status === 'expired') expired++;
-      else if (status === 'urgent') urgent++;
-      else if (status === 'warning') warning++;
-    });
+    batches
+      .filter((b) => b.quantity > 0)
+      .forEach((batch) => {
+        const days = getDaysUntilExpiry(batch.expiryDate);
+        const status = getExpiryStatus(days);
+        if (status !== 'normal') {
+          expiringBatches.push(batch);
+        }
+        if (status === 'expired') expired++;
+        else if (status === 'urgent') urgent++;
+        else if (status === 'warning') warning++;
+      });
 
-    expiringMedicines.sort(
-      (a, b) => getDaysUntilExpiry(a.expiryDate) - getDaysUntilExpiry(b.expiryDate)
+    expiringBatches.sort(
+      (a, b) =>
+        (getDaysUntilExpiry(a.expiryDate) ?? 9999) -
+        (getDaysUntilExpiry(b.expiryDate) ?? 9999)
     );
 
-    return { expired, urgent, warning, expiringMedicines };
-  }, [medicines]);
+    return { expired, urgent, warning, expiringBatches };
+  }, [batches]);
 
   const stockStats = useMemo(() => {
     let outOfStock = 0;
@@ -59,7 +66,8 @@ export function Dashboard() {
     const lowStockMedicines: typeof medicines = [];
 
     medicines.forEach((med) => {
-      const status = getStockAlertStatus(med.stock, med.safetyStock);
+      const stock = getMedicineStock(med.id);
+      const status = getStockAlertStatus(stock, med.safetyStock);
       if (status !== 'normal') {
         lowStockMedicines.push(med);
       }
@@ -68,18 +76,29 @@ export function Dashboard() {
       else if (status === 'warning') warning++;
     });
 
-    lowStockMedicines.sort((a, b) => a.stock - b.stock);
+    lowStockMedicines.sort((a, b) => getMedicineStock(a.id) - getMedicineStock(b.id));
 
     return { outOfStock, critical, warning, lowStockMedicines };
-  }, [medicines]);
+  }, [medicines, getMedicineStock]);
 
   const todaySales = useMemo(() => {
     const todayRecords = saleRecords.filter((r) => isToday(r.saleTime));
     const totalAmount = todayRecords.reduce((sum, r) => sum + r.totalAmount, 0);
     const totalProfit = todayRecords.reduce((sum, r) => sum + r.profit, 0);
-    const totalQuantity = todayRecords.reduce((sum, r) => sum + r.quantity, 0);
+    const totalQuantity = todayRecords.reduce((sum, r) => sum + r.quantity + r.freeQuantity, 0);
     return { totalAmount, totalProfit, totalQuantity, count: todayRecords.length };
   }, [saleRecords]);
+
+  const replenishmentList = useMemo(() => getReplenishmentList(), [getReplenishmentList]);
+
+  const getMedicineName = (medicineId: string) => {
+    return medicines.find((m) => m.id === medicineId)?.name || '未知药品';
+  };
+
+  const getMedicineSpec = (medicineId: string) => {
+    const med = medicines.find((m) => m.id === medicineId);
+    return med ? med.specification : '';
+  };
 
   return (
     <div className="space-y-6">
@@ -90,11 +109,11 @@ export function Dashboard() {
         </div>
         <div className="flex gap-3">
           <Link
-            to="/inventory"
+            to="/suppliers"
             className="inline-flex items-center gap-2 px-4 py-2.5 bg-white border border-slate-200 text-slate-700 rounded-xl hover:bg-slate-50 transition-colors font-medium text-sm"
           >
-            <PackagePlus className="w-4 h-4" />
-            快速入库
+            <ListChecks className="w-4 h-4" />
+            补货清单 ({replenishmentList.length})
           </Link>
           <Link
             to="/inventory"
@@ -113,7 +132,7 @@ export function Dashboard() {
               <AlertTriangle className="w-6 h-6 text-rose-500" />
             </div>
             <span className="text-xs font-medium text-rose-500 bg-rose-50 px-2 py-1 rounded-full">
-              {expiryStats.expired + expiryStats.urgent + expiryStats.warning} 种
+              {expiryStats.expired + expiryStats.urgent + expiryStats.warning} 批
             </span>
           </div>
           <div className="mt-4">
@@ -207,7 +226,10 @@ export function Dashboard() {
               <div className="w-9 h-9 bg-rose-50 rounded-lg flex items-center justify-center">
                 <Clock className="w-5 h-5 text-rose-500" />
               </div>
-              <h3 className="font-semibold text-slate-800">即将过期药品</h3>
+              <div>
+                <h3 className="font-semibold text-slate-800">即将过期批次</h3>
+                <p className="text-xs text-slate-500">按批次精确追踪有效期</p>
+              </div>
             </div>
             <Link
               to="/medicines"
@@ -218,21 +240,21 @@ export function Dashboard() {
             </Link>
           </div>
           <div className="p-5">
-            {expiryStats.expiringMedicines.length === 0 ? (
+            {expiryStats.expiringBatches.length === 0 ? (
               <div className="text-center py-10">
                 <div className="w-16 h-16 bg-emerald-50 rounded-full flex items-center justify-center mx-auto mb-3">
                   <Clock className="w-8 h-8 text-emerald-500" />
                 </div>
-                <p className="text-slate-500">所有药品都在有效期内 🎉</p>
+                <p className="text-slate-500">所有批次都在有效期内 🎉</p>
               </div>
             ) : (
               <div className="space-y-3">
-                {expiryStats.expiringMedicines.slice(0, 5).map((med) => {
-                  const days = getDaysUntilExpiry(med.expiryDate);
+                {expiryStats.expiringBatches.slice(0, 5).map((batch) => {
+                  const days = getDaysUntilExpiry(batch.expiryDate);
                   const status = getExpiryStatus(days);
                   return (
                     <div
-                      key={med.id}
+                      key={batch.id}
                       className="flex items-center justify-between p-3 bg-slate-50 rounded-xl hover:bg-slate-100 transition-colors"
                     >
                       <div className="flex items-center gap-3">
@@ -240,9 +262,11 @@ export function Dashboard() {
                           <Pill className="w-5 h-5 text-slate-400" />
                         </div>
                         <div>
-                          <p className="font-medium text-slate-800 text-sm">{med.name}</p>
+                          <p className="font-medium text-slate-800 text-sm">
+                            {getMedicineName(batch.medicineId)}
+                          </p>
                           <p className="text-xs text-slate-500">
-                            {med.category} · {med.specification}
+                            批次号: {batch.batchNo} · {getMedicineSpec(batch.medicineId)}
                           </p>
                         </div>
                       </div>
@@ -255,7 +279,11 @@ export function Dashboard() {
                           {getExpiryStatusText(status)}
                         </span>
                         <p className="text-xs text-slate-500 mt-1">
-                          {days > 0 ? `还剩 ${days} 天` : `已过期 ${Math.abs(days)} 天`}
+                          {days !== null
+                            ? days > 0
+                              ? `还剩 ${days} 天 · 库存 ${batch.quantity} 盒`
+                              : `已过期 ${Math.abs(days)} 天 · 库存 ${batch.quantity} 盒`
+                            : '未设置有效期'}
                         </p>
                       </div>
                     </div>
@@ -286,7 +314,8 @@ export function Dashboard() {
             ) : (
               <div className="space-y-3">
                 {stockStats.lowStockMedicines.slice(0, 5).map((med) => {
-                  const status = getStockAlertStatus(med.stock, med.safetyStock);
+                  const stock = getMedicineStock(med.id);
+                  const status = getStockAlertStatus(stock, med.safetyStock);
                   return (
                     <div
                       key={med.id}
@@ -294,9 +323,7 @@ export function Dashboard() {
                     >
                       <div>
                         <p className="font-medium text-slate-800 text-sm">{med.name}</p>
-                        <p className="text-xs text-slate-500">
-                          安全库存: {med.safetyStock} 盒
-                        </p>
+                        <p className="text-xs text-slate-500">安全库存: {med.safetyStock} 盒</p>
                       </div>
                       <div className="text-right">
                         <span
@@ -306,9 +333,7 @@ export function Dashboard() {
                         >
                           {getStockAlertStatusText(status)}
                         </span>
-                        <p className="text-xs text-slate-500 mt-1">
-                          当前库存: {med.stock} 盒
-                        </p>
+                        <p className="text-xs text-slate-500 mt-1">当前库存: {stock} 盒</p>
                       </div>
                     </div>
                   );
@@ -319,6 +344,49 @@ export function Dashboard() {
         </div>
       </div>
 
+      {replenishmentList.length > 0 && (
+        <div className="bg-gradient-to-br from-amber-50 to-orange-50 rounded-2xl border border-amber-200 p-5">
+          <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 bg-amber-100 rounded-xl flex items-center justify-center">
+                <ListChecks className="w-5 h-5 text-amber-600" />
+              </div>
+              <div>
+                <h3 className="font-semibold text-slate-800">补货清单</h3>
+                <p className="text-xs text-slate-500">以下药品库存不足，建议尽快补货</p>
+              </div>
+            </div>
+            <Link
+              to="/suppliers"
+              className="inline-flex items-center gap-2 px-4 py-2 bg-amber-500 text-white rounded-xl hover:bg-amber-600 transition-colors font-medium text-sm"
+            >
+              <Phone className="w-4 h-4" />
+              查看供货商联系方式
+            </Link>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            {replenishmentList.slice(0, 4).map((item) => (
+              <div
+                key={item.medicine.id}
+                className="bg-white/80 backdrop-blur rounded-xl p-3 border border-amber-100"
+              >
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="font-medium text-slate-800 text-sm">{item.medicine.name}</p>
+                    <p className="text-xs text-slate-500">
+                      当前: {item.currentStock} / 安全: {item.safetyStock}
+                    </p>
+                  </div>
+                  <span className="px-2.5 py-1 bg-amber-100 text-amber-700 rounded-lg text-xs font-semibold">
+                    建议补 {item.suggestedQuantity} 盒
+                  </span>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       <div className="grid grid-cols-3 gap-5">
         <div className="bg-gradient-to-br from-emerald-500 to-teal-600 rounded-2xl p-6 text-white">
           <div className="w-14 h-14 bg-white/20 rounded-2xl flex items-center justify-center mb-4">
@@ -326,7 +394,7 @@ export function Dashboard() {
           </div>
           <h3 className="text-lg font-semibold mb-2">新增药品</h3>
           <p className="text-sm text-emerald-100 mb-4">
-            添加新的药品信息，包括名称、规格、价格等
+            添加新的药品信息，支持多批次管理
           </p>
           <Link
             to="/medicines"
@@ -343,7 +411,7 @@ export function Dashboard() {
           </div>
           <h3 className="text-lg font-semibold mb-2">药品入库</h3>
           <p className="text-sm text-sky-100 mb-4">
-            药品到货后登记入库，更新库存数量
+            按批次登记入库，记录生产日期和有效期
           </p>
           <Link
             to="/inventory"

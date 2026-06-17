@@ -1,105 +1,101 @@
 import { useState, useMemo } from 'react';
 import {
   Plus,
-  Tag,
   Edit2,
   Trash2,
-  ToggleLeft,
-  ToggleRight,
-  Calendar,
-  TrendingUp,
-  Gift,
+  Tag,
   Percent,
+  Gift,
+  Calendar,
+  Pill,
+  TrendingUp,
+  Package,
+  CircleDollarSign,
 } from 'lucide-react';
 import { useAppStore } from '@/store';
 import { Modal } from '@/components/Modal';
 import { useToast } from '@/components/Toast';
 import type { Promotion } from '@/types';
-import {
-  formatCurrency,
-  formatDate,
-  isPromotionActive,
-  isDateInRange,
-} from '@/utils';
+import { formatCurrency, formatDate } from '@/utils';
 
 export function Promotions() {
   const {
-    promotions,
     medicines,
+    promotions,
     saleRecords,
     addPromotion,
     updatePromotion,
     deletePromotion,
-    togglePromotionActive,
   } = useAppStore();
   const toast = useToast();
 
   const [isModalOpen, setIsModalOpen] = useState(false);
-  const [editingPromotion, setEditingPromotion] = useState<Promotion | null>(null);
-  const [formData, setFormData] = useState({
-    name: '',
-    type: 'buy_get_free' as 'buy_get_free' | 'discount',
-    medicineId: '',
-    buyQuantity: 2,
-    freeQuantity: 1,
-    discount: 0.8,
-    startDate: '',
-    endDate: '',
-    isActive: true,
-  });
-
-  const activeCount = useMemo(
-    () => promotions.filter((p) => isPromotionActive(p)).length,
-    [promotions]
+  const [editingPromotion, setEditingPromotion] = useState<Promotion | null>(
+    null
   );
 
-  const getPromoEffect = (promotion: Promotion) => {
-    const promoSales = saleRecords.filter(
-      (r) => r.promotionId === promotion.id
-    );
-    const totalQuantity = promoSales.reduce((sum, r) => sum + r.quantity, 0);
-    const totalAmount = promoSales.reduce((sum, r) => sum + r.totalAmount, 0);
+  const [formData, setFormData] = useState({
+    name: '',
+    type: 'buy_get_free' as Promotion['type'],
+    medicineId: '',
+    buyQuantity: '2',
+    freeQuantity: '1',
+    discount: '9',
+    startDate: '',
+    endDate: '',
+  });
 
-    const medicine = medicines.find((m) => m.id === promotion.medicineId);
-    const originalPrice = medicine?.sellPrice || 0;
-    const originalTotal = totalQuantity * originalPrice;
-    const extraSales = originalTotal - totalAmount;
+  const getMedicineName = (id: string) =>
+    medicines.find((m) => m.id === id)?.name || '-';
 
-    return { totalQuantity, totalAmount, extraSales };
+  const getPromotionStats = (promotionId: string) => {
+    const promoSales = saleRecords.filter((s) => s.promotionId === promotionId);
+    const paidQty = promoSales.reduce((sum, s) => sum + s.quantity, 0);
+    const freeQty = promoSales.reduce((sum, s) => sum + (s.freeQuantity || 0), 0);
+    const revenue = promoSales.reduce((sum, s) => sum + s.totalAmount, 0);
+    return { paidQty, freeQty, revenue, orderCount: promoSales.length };
   };
 
-  const openModal = (promotion?: Promotion) => {
+  const isPromotionActive = (promo: Promotion) => {
+    const now = new Date();
+    const start = new Date(promo.startDate);
+    const end = new Date(promo.endDate);
+    end.setHours(23, 59, 59, 999);
+    return now >= start && now <= end;
+  };
+
+  const handleOpenModal = (promotion?: Promotion) => {
     if (promotion) {
       setEditingPromotion(promotion);
       setFormData({
         name: promotion.name,
         type: promotion.type,
         medicineId: promotion.medicineId,
-        buyQuantity: promotion.buyQuantity,
-        freeQuantity: promotion.freeQuantity,
-        discount: promotion.discount,
+        buyQuantity: promotion.buyQuantity?.toString() || '2',
+        freeQuantity: promotion.freeQuantity?.toString() || '1',
+        discount: promotion.discount?.toString() || '9',
         startDate: promotion.startDate,
         endDate: promotion.endDate,
-        isActive: promotion.isActive,
       });
     } else {
       setEditingPromotion(null);
+      const today = new Date();
+      const nextMonth = new Date(today.getTime() + 30 * 24 * 60 * 60 * 1000);
       setFormData({
         name: '',
         type: 'buy_get_free',
         medicineId: medicines[0]?.id || '',
-        buyQuantity: 2,
-        freeQuantity: 1,
-        discount: 0.8,
-        startDate: formatDate(new Date()),
-        endDate: formatDate(new Date(Date.now() + 30 * 24 * 60 * 60 * 1000)),
-        isActive: true,
+        buyQuantity: '2',
+        freeQuantity: '1',
+        discount: '9',
+        startDate: today.toISOString().split('T')[0],
+        endDate: nextMonth.toISOString().split('T')[0],
       });
     }
     setIsModalOpen(true);
   };
 
-  const closeModal = () => {
+  const handleCloseModal = () => {
     setIsModalOpen(false);
     setEditingPromotion(null);
   };
@@ -112,54 +108,72 @@ export function Promotions() {
       return;
     }
 
+    if (new Date(formData.endDate) < new Date(formData.startDate)) {
+      toast.error('结束日期不能早于开始日期');
+      return;
+    }
+
+    if (formData.type === 'buy_get_free') {
+      if (
+        !formData.buyQuantity ||
+        !formData.freeQuantity ||
+        parseInt(formData.buyQuantity) <= 0 ||
+        parseInt(formData.freeQuantity) <= 0
+      ) {
+        toast.error('请输入有效的买赠数量');
+        return;
+      }
+    } else {
+      if (
+        !formData.discount ||
+        parseFloat(formData.discount) <= 0 ||
+        parseFloat(formData.discount) >= 10
+      ) {
+        toast.error('折扣值需要在 0-10 之间（不包含 0 和 10）');
+        return;
+      }
+    }
+
     const promotionData = {
       name: formData.name,
       type: formData.type,
       medicineId: formData.medicineId,
-      buyQuantity: formData.buyQuantity,
-      freeQuantity: formData.freeQuantity,
-      discount: formData.discount,
+      buyQuantity: formData.type === 'buy_get_free' ? parseInt(formData.buyQuantity) : undefined,
+      freeQuantity: formData.type === 'buy_get_free' ? parseInt(formData.freeQuantity) : undefined,
+      discount:
+        formData.type === 'discount' ? parseFloat(formData.discount) : undefined,
       startDate: formData.startDate,
       endDate: formData.endDate,
-      isActive: formData.isActive,
+      isActive: true,
     };
 
     if (editingPromotion) {
       updatePromotion(editingPromotion.id, promotionData);
-      toast.success('活动已更新');
+      toast.success('促销活动已更新');
     } else {
       addPromotion(promotionData);
-      toast.success('活动创建成功');
+      toast.success('促销活动已创建');
     }
 
-    closeModal();
+    handleCloseModal();
   };
 
   const handleDelete = (id: string) => {
     if (window.confirm('确定要删除这个促销活动吗？')) {
       deletePromotion(id);
-      toast.success('活动已删除');
+      toast.success('促销活动已删除');
     }
   };
 
-  const handleToggle = (id: string) => {
-    togglePromotionActive(id);
-  };
-
-  const getMedicineName = (medicineId: string) => {
-    return medicines.find((m) => m.id === medicineId)?.name || '-';
-  };
-
-  const getPromotionTypeText = (type: string) => {
-    return type === 'buy_get_free' ? '买赠活动' : '折扣活动';
-  };
-
-  const getPromotionDesc = (promotion: Promotion) => {
-    if (promotion.type === 'buy_get_free') {
-      return `买${promotion.buyQuantity}送${promotion.freeQuantity}`;
-    }
-    return `${(promotion.discount * 10).toFixed(1)}折优惠`;
-  };
+  const sortedPromotions = useMemo(() => {
+    return [...promotions].sort((a, b) => {
+      const aActive = isPromotionActive(a);
+      const bActive = isPromotionActive(b);
+      if (aActive && !bActive) return -1;
+      if (!aActive && bActive) return 1;
+      return new Date(b.startDate).getTime() - new Date(a.startDate).getTime();
+    });
+  }, [promotions]);
 
   return (
     <div className="space-y-6">
@@ -167,174 +181,233 @@ export function Promotions() {
         <div>
           <h1 className="text-2xl font-bold text-slate-800">促销活动</h1>
           <p className="text-slate-500 mt-1">
-            管理促销活动，共 {promotions.length} 个活动，进行中 {activeCount} 个
+            管理买赠和折扣活动，共 {promotions.length} 个活动
           </p>
         </div>
         <button
-          onClick={() => openModal()}
-          className="inline-flex items-center gap-2 px-5 py-2.5 bg-gradient-to-r from-emerald-500 to-teal-600 text-white rounded-xl hover:shadow-lg hover:shadow-emerald-500/30 transition-all font-medium text-sm"
+          onClick={() => handleOpenModal()}
+          className="inline-flex items-center gap-2 px-5 py-2.5 bg-gradient-to-r from-violet-500 to-purple-600 text-white rounded-xl hover:shadow-lg hover:shadow-violet-500/30 transition-all font-medium text-sm"
         >
           <Plus className="w-5 h-5" />
-          创建活动
+          新建活动
         </button>
       </div>
 
-      <div className="grid grid-cols-3 gap-5">
-        <div className="bg-gradient-to-br from-amber-500 to-orange-600 rounded-2xl p-6 text-white">
-          <div className="w-12 h-12 bg-white/20 rounded-xl flex items-center justify-center mb-4">
-            <Tag className="w-6 h-6" />
+      <div className="grid grid-cols-3 gap-4">
+        <div className="bg-white rounded-2xl p-5 border border-slate-100 shadow-sm">
+          <div className="flex items-center gap-3">
+            <div className="w-11 h-11 bg-violet-50 rounded-xl flex items-center justify-center">
+              <Tag className="w-5 h-5 text-violet-500" />
+            </div>
+            <div>
+              <p className="text-sm text-slate-500">进行中活动</p>
+              <p className="text-2xl font-bold text-slate-800">
+                {promotions.filter(isPromotionActive).length}
+              </p>
+            </div>
           </div>
-          <p className="text-white/80 text-sm">进行中活动</p>
-          <p className="text-3xl font-bold mt-1">{activeCount}</p>
         </div>
 
-        <div className="bg-gradient-to-br from-emerald-500 to-teal-600 rounded-2xl p-6 text-white">
-          <div className="w-12 h-12 bg-white/20 rounded-xl flex items-center justify-center mb-4">
-            <Gift className="w-6 h-6" />
+        <div className="bg-white rounded-2xl p-5 border border-slate-100 shadow-sm">
+          <div className="flex items-center gap-3">
+            <div className="w-11 h-11 bg-emerald-50 rounded-xl flex items-center justify-center">
+              <TrendingUp className="w-5 h-5 text-emerald-500" />
+            </div>
+            <div>
+              <p className="text-sm text-slate-500">活动总销量</p>
+              <p className="text-2xl font-bold text-slate-800">
+                {
+                  promotions.reduce(
+                    (sum, p) => sum + getPromotionStats(p.id).paidQty + getPromotionStats(p.id).freeQty,
+                    0
+                  )
+                }
+                <span className="text-sm font-normal text-slate-500 ml-1">盒</span>
+              </p>
+            </div>
           </div>
-          <p className="text-white/80 text-sm">买赠活动</p>
-          <p className="text-3xl font-bold mt-1">
-            {promotions.filter((p) => p.type === 'buy_get_free').length}
-          </p>
         </div>
 
-        <div className="bg-gradient-to-br from-violet-500 to-purple-600 rounded-2xl p-6 text-white">
-          <div className="w-12 h-12 bg-white/20 rounded-xl flex items-center justify-center mb-4">
-            <Percent className="w-6 h-6" />
+        <div className="bg-white rounded-2xl p-5 border border-slate-100 shadow-sm">
+          <div className="flex items-center gap-3">
+            <div className="w-11 h-11 bg-amber-50 rounded-xl flex items-center justify-center">
+              <CircleDollarSign className="w-5 h-5 text-amber-500" />
+            </div>
+            <div>
+              <p className="text-sm text-slate-500">活动总销售额</p>
+              <p className="text-2xl font-bold text-slate-800">
+                {formatCurrency(
+                  promotions.reduce(
+                    (sum, p) => sum + getPromotionStats(p.id).revenue,
+                    0
+                  )
+                )}
+              </p>
+            </div>
           </div>
-          <p className="text-white/80 text-sm">折扣活动</p>
-          <p className="text-3xl font-bold mt-1">
-            {promotions.filter((p) => p.type === 'discount').length}
-          </p>
         </div>
       </div>
 
-      <div className="space-y-4">
-        {promotions.length === 0 ? (
-          <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-12 text-center">
+      <div className="grid grid-cols-2 gap-4">
+        {sortedPromotions.length === 0 ? (
+          <div className="col-span-2 bg-white rounded-2xl border border-slate-100 shadow-sm p-16 text-center">
             <div className="w-16 h-16 bg-slate-100 rounded-full flex items-center justify-center mx-auto mb-4">
-              <Tag className="w-8 h-8 text-slate-400" />
+              <Gift className="w-8 h-8 text-slate-400" />
             </div>
-            <p className="text-slate-500 mb-4">暂无促销活动</p>
-            <button
-              onClick={() => openModal()}
-              className="inline-flex items-center gap-2 px-4 py-2 bg-emerald-500 text-white rounded-lg hover:bg-emerald-600 transition-colors text-sm font-medium"
-            >
-              <Plus className="w-4 h-4" />
-              创建第一个活动
-            </button>
+            <p className="text-slate-500">暂无促销活动，点击右上角新建</p>
           </div>
         ) : (
-          promotions.map((promotion) => {
-            const isActive = isPromotionActive(promotion);
-            const effect = getPromoEffect(promotion);
+          sortedPromotions.map((promo) => {
+            const stats = getPromotionStats(promo.id);
+            const active = isPromotionActive(promo);
+            const med = medicines.find((m) => m.id === promo.medicineId);
+
             return (
               <div
-                key={promotion.id}
+                key={promo.id}
                 className={`bg-white rounded-2xl border shadow-sm overflow-hidden transition-all ${
-                  isActive ? 'border-emerald-200' : 'border-slate-100'
+                  active ? 'border-violet-200' : 'border-slate-100 opacity-80'
                 }`}
               >
-                <div className="p-5">
-                  <div className="flex items-start justify-between">
-                    <div className="flex items-start gap-4">
-                      <div
-                        className={`w-12 h-12 rounded-xl flex items-center justify-center ${
-                          promotion.type === 'buy_get_free'
-                            ? 'bg-amber-50 text-amber-600'
-                            : 'bg-violet-50 text-violet-600'
-                        }`}
-                      >
-                        {promotion.type === 'buy_get_free' ? (
-                          <Gift className="w-6 h-6" />
-                        ) : (
-                          <Percent className="w-6 h-6" />
-                        )}
-                      </div>
-                      <div>
-                        <div className="flex items-center gap-2">
-                          <h3 className="font-semibold text-slate-800">
-                            {promotion.name}
-                          </h3>
-                          <span
-                            className={`px-2 py-0.5 text-xs font-medium rounded-full ${
-                              isActive
-                                ? 'bg-emerald-100 text-emerald-700'
-                                : 'bg-slate-100 text-slate-600'
-                            }`}
-                          >
-                            {isActive ? '进行中' : '已结束'}
-                          </span>
-                        </div>
-                        <p className="text-sm text-slate-500 mt-1">
-                          {getMedicineName(promotion.medicineId)} ·{' '}
-                          {getPromotionTypeText(promotion.type)}
-                        </p>
-                        <p className="text-sm font-medium text-emerald-600 mt-1">
-                          {getPromotionDesc(promotion)}
-                        </p>
-                      </div>
+                <div
+                  className={`px-5 py-4 border-b flex items-center justify-between ${
+                    active
+                      ? 'bg-gradient-to-r from-violet-50 to-purple-50 border-violet-100'
+                      : 'bg-slate-50 border-slate-100'
+                  }`}
+                >
+                  <div className="flex items-center gap-3">
+                    <div
+                      className={`w-10 h-10 rounded-xl flex items-center justify-center ${
+                        active
+                          ? 'bg-gradient-to-br from-violet-500 to-purple-600'
+                          : 'bg-slate-200'
+                      }`}
+                    >
+                      {promo.type === 'buy_get_free' ? (
+                        <Gift
+                          className={`w-5 h-5 ${
+                            active ? 'text-white' : 'text-slate-500'
+                          }`}
+                        />
+                      ) : (
+                        <Percent
+                          className={`w-5 h-5 ${
+                            active ? 'text-white' : 'text-slate-500'
+                          }`}
+                        />
+                      )}
                     </div>
-                    <div className="flex items-center gap-2">
-                      <button
-                        onClick={() => handleToggle(promotion.id)}
-                        className="p-2 text-slate-400 hover:text-emerald-600 hover:bg-emerald-50 rounded-lg transition-colors"
-                        title={promotion.isActive ? '停用' : '启用'}
-                      >
-                        {promotion.isActive ? (
-                          <ToggleRight className="w-5 h-5 text-emerald-500" />
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <p className="font-semibold text-slate-800">{promo.name}</p>
+                        {active ? (
+                          <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-violet-100 text-violet-700">
+                            进行中
+                          </span>
+                        ) : new Date(promo.startDate) > new Date() ? (
+                          <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-sky-100 text-sky-700">
+                            未开始
+                          </span>
                         ) : (
-                          <ToggleLeft className="w-5 h-5" />
+                          <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-slate-100 text-slate-600">
+                            已结束
+                          </span>
                         )}
-                      </button>
-                      <button
-                        onClick={() => openModal(promotion)}
-                        className="p-2 text-slate-400 hover:text-sky-600 hover:bg-sky-50 rounded-lg transition-colors"
-                      >
-                        <Edit2 className="w-4 h-4" />
-                      </button>
-                      <button
-                        onClick={() => handleDelete(promotion.id)}
-                        className="p-2 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
+                      </div>
+                      <p className="text-xs text-slate-500 mt-0.5 flex items-center gap-1">
+                        <Calendar className="w-3 h-3" />
+                        {formatDate(promo.startDate)} - {formatDate(promo.endDate)}
+                      </p>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-1">
+                    <button
+                      onClick={() => handleOpenModal(promo)}
+                      className="p-2 text-slate-400 hover:text-violet-600 hover:bg-violet-50 rounded-lg transition-colors"
+                    >
+                      <Edit2 className="w-4 h-4" />
+                    </button>
+                    <button
+                      onClick={() => handleDelete(promo.id)}
+                      className="p-2 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  </div>
+                </div>
+
+                <div className="p-5 space-y-4">
+                  <div className="flex items-center gap-2">
+                    <div className="w-8 h-8 bg-emerald-50 rounded-lg flex items-center justify-center">
+                      <Pill className="w-4 h-4 text-emerald-500" />
+                    </div>
+                    <div>
+                      <p className="text-sm font-medium text-slate-700">
+                        {med?.name || '已删除药品'}
+                      </p>
+                      <p className="text-xs text-slate-500">
+                        {med?.specification || ''}
+                      </p>
                     </div>
                   </div>
 
-                  <div className="grid grid-cols-4 gap-4 mt-5 pt-4 border-t border-slate-100">
-                    <div>
-                      <div className="flex items-center gap-1.5 text-xs text-slate-500 mb-1">
-                        <Calendar className="w-3.5 h-3.5" />
-                        活动时间
-                      </div>
-                      <p className="text-sm font-medium text-slate-700">
-                        {formatDate(promotion.startDate)} ~{' '}
-                        {formatDate(promotion.endDate)}
+                  <div className="bg-slate-50 rounded-xl p-3">
+                    <p className="text-sm font-medium text-slate-700">
+                      {promo.type === 'buy_get_free'
+                        ? `买 ${promo.buyQuantity} 盒送 ${promo.freeQuantity} 盒`
+                        : `${promo.discount} 折优惠`}
+                    </p>
+                    <p className="text-xs text-slate-500 mt-1">
+                      {promo.type === 'buy_get_free'
+                        ? `每买 ${promo.buyQuantity} 盒可获得 ${promo.freeQuantity} 盒赠品，赠送盒数也会扣减库存`
+                        : `按原价的 ${promo.discount * 10}% 销售`}
+                    </p>
+                  </div>
+
+                  <div className="grid grid-cols-4 gap-3 pt-2">
+                    <div className="text-center p-3 bg-sky-50 rounded-xl">
+                      <p className="text-xs text-sky-600">收款盒数</p>
+                      <p className="text-lg font-bold text-sky-700 mt-1">
+                        {stats.paidQty}
                       </p>
                     </div>
-                    <div>
-                      <div className="text-xs text-slate-500 mb-1">活动销量</div>
-                      <p className="text-sm font-medium text-slate-700">
-                        {effect.totalQuantity} 件
+                    <div className="text-center p-3 bg-violet-50 rounded-xl">
+                      <p className="text-xs text-violet-600">赠送盒数</p>
+                      <p className="text-lg font-bold text-violet-700 mt-1">
+                        {stats.freeQty}
                       </p>
                     </div>
-                    <div>
-                      <div className="text-xs text-slate-500 mb-1">活动销售额</div>
-                      <p className="text-sm font-medium text-slate-700">
-                        {formatCurrency(effect.totalAmount)}
+                    <div className="text-center p-3 bg-emerald-50 rounded-xl">
+                      <p className="text-xs text-emerald-600">实际出库</p>
+                      <p className="text-lg font-bold text-emerald-700 mt-1">
+                        {stats.paidQty + stats.freeQty}
                       </p>
                     </div>
-                    <div>
-                      <div className="flex items-center gap-1.5 text-xs text-slate-500 mb-1">
-                        <TrendingUp className="w-3.5 h-3.5" />
-                        优惠金额
-                      </div>
-                      <p className="text-sm font-medium text-emerald-600">
-                        {formatCurrency(effect.extraSales)}
+                    <div className="text-center p-3 bg-amber-50 rounded-xl">
+                      <p className="text-xs text-amber-600">销售额</p>
+                      <p className="text-lg font-bold text-amber-700 mt-1">
+                        {formatCurrency(stats.revenue)}
                       </p>
                     </div>
                   </div>
+
+                  {promo.type === 'buy_get_free' && stats.paidQty > 0 && (
+                    <div className="flex items-center gap-2 p-3 bg-gradient-to-r from-emerald-50 to-teal-50 rounded-xl border border-emerald-100">
+                      <Package className="w-4 h-4 text-emerald-500 flex-shrink-0" />
+                      <p className="text-xs text-emerald-700">
+                        活动期间通过买赠实际多卖出了{' '}
+                        <span className="font-bold text-emerald-800">
+                          {stats.freeQty}
+                        </span>{' '}
+                        盒（赠品），相当于{' '}
+                        <span className="font-bold text-emerald-800">
+                          {(((stats.freeQty) / (stats.paidQty + stats.freeQty)) * 100).toFixed(1)}%
+                        </span>{' '}
+                        的赠送率
+                      </p>
+                    </div>
+                  )}
                 </div>
               </div>
             );
@@ -344,8 +417,8 @@ export function Promotions() {
 
       <Modal
         isOpen={isModalOpen}
-        onClose={closeModal}
-        title={editingPromotion ? '编辑活动' : '创建促销活动'}
+        onClose={handleCloseModal}
+        title={editingPromotion ? '编辑促销活动' : '新建促销活动'}
         size="lg"
       >
         <form onSubmit={handleSubmit} className="space-y-4">
@@ -357,8 +430,8 @@ export function Promotions() {
               type="text"
               value={formData.name}
               onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-              className="w-full px-4 py-2.5 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all"
-              placeholder="如：维生素C买二送一"
+              className="w-full px-4 py-2.5 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-violet-500/20 focus:border-violet-500 transition-all"
+              placeholder="如：春季感冒灵买二送一"
             />
           </div>
 
@@ -366,75 +439,59 @@ export function Promotions() {
             <label className="block text-sm font-medium text-slate-700 mb-1">
               活动类型
             </label>
-            <div className="flex gap-3">
-              <label className="flex-1">
-                <input
-                  type="radio"
-                  name="type"
-                  value="buy_get_free"
-                  checked={formData.type === 'buy_get_free'}
-                  onChange={(e) =>
-                    setFormData({
-                      ...formData,
-                      type: e.target.value as 'buy_get_free' | 'discount',
-                    })
-                  }
-                  className="sr-only"
-                />
-                <div
-                  className={`p-4 border-2 rounded-xl cursor-pointer transition-all ${
-                    formData.type === 'buy_get_free'
-                      ? 'border-emerald-500 bg-emerald-50'
-                      : 'border-slate-200 hover:border-slate-300'
-                  }`}
-                >
-                  <div className="flex items-center gap-2 mb-1">
-                    <Gift
-                      className={`w-5 h-5 ${
-                        formData.type === 'buy_get_free'
-                          ? 'text-emerald-600'
-                          : 'text-slate-400'
-                      }`}
-                    />
-                    <span className="font-medium text-slate-800">买赠活动</span>
-                  </div>
-                  <p className="text-xs text-slate-500">买几送几，如买二送一</p>
+            <div className="grid grid-cols-2 gap-3">
+              <button
+                type="button"
+                onClick={() => setFormData({ ...formData, type: 'buy_get_free' })}
+                className={`p-4 rounded-xl border-2 text-left transition-all ${
+                  formData.type === 'buy_get_free'
+                    ? 'border-violet-500 bg-violet-50'
+                    : 'border-slate-200 hover:border-slate-300'
+                }`}
+              >
+                <div className="flex items-center gap-2 mb-1">
+                  <Gift
+                    className={`w-5 h-5 ${
+                      formData.type === 'buy_get_free' ? 'text-violet-500' : 'text-slate-400'
+                    }`}
+                  />
+                  <span
+                    className={`font-medium ${
+                      formData.type === 'buy_get_free' ? 'text-violet-700' : 'text-slate-700'
+                    }`}
+                  >
+                    买赠活动
+                  </span>
                 </div>
-              </label>
-              <label className="flex-1">
-                <input
-                  type="radio"
-                  name="type"
-                  value="discount"
-                  checked={formData.type === 'discount'}
-                  onChange={(e) =>
-                    setFormData({
-                      ...formData,
-                      type: e.target.value as 'buy_get_free' | 'discount',
-                    })
-                  }
-                  className="sr-only"
-                />
-                <div
-                  className={`p-4 border-2 rounded-xl cursor-pointer transition-all ${
-                    formData.type === 'discount'
-                      ? 'border-emerald-500 bg-emerald-50'
-                      : 'border-slate-200 hover:border-slate-300'
-                  }`}
-                >
-                  <div className="flex items-center gap-2 mb-1">
-                    <Percent
-                      className={`w-5 h-5 ${
-                        formData.type === 'discount'
-                          ? 'text-emerald-600'
-                          : 'text-slate-400'
-                      }`}
-                    />
-                    <span className="font-medium text-slate-800">折扣活动</span>
-                  </div>
-                  <p className="text-xs text-slate-500">打折优惠，如8折</p>
+                <p className="text-xs text-slate-500">
+                  如买二送一，系统自动扣减赠品库存
+                </p>
+              </button>
+              <button
+                type="button"
+                onClick={() => setFormData({ ...formData, type: 'discount' })}
+                className={`p-4 rounded-xl border-2 text-left transition-all ${
+                  formData.type === 'discount'
+                    ? 'border-violet-500 bg-violet-50'
+                    : 'border-slate-200 hover:border-slate-300'
+                }`}
+              >
+                <div className="flex items-center gap-2 mb-1">
+                  <Percent
+                    className={`w-5 h-5 ${
+                      formData.type === 'discount' ? 'text-violet-500' : 'text-slate-400'
+                    }`}
+                  />
+                  <span
+                    className={`font-medium ${
+                      formData.type === 'discount' ? 'text-violet-700' : 'text-slate-700'
+                    }`}
+                  >
+                    折扣活动
+                  </span>
                 </div>
-              </label>
+                <p className="text-xs text-slate-500">如 9 折优惠</p>
+              </button>
             </div>
           </div>
 
@@ -447,11 +504,11 @@ export function Promotions() {
               onChange={(e) =>
                 setFormData({ ...formData, medicineId: e.target.value })
               }
-              className="w-full px-4 py-2.5 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all"
+              className="w-full px-4 py-2.5 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-violet-500/20 focus:border-violet-500 transition-all"
             >
-              {medicines.map((med) => (
-                <option key={med.id} value={med.id}>
-                  {med.name} - {med.specification}（售价: {formatCurrency(med.sellPrice)}）
+              {medicines.map((m) => (
+                <option key={m.id} value={m.id}>
+                  {m.name} - {m.specification}
                 </option>
               ))}
             </select>
@@ -461,60 +518,52 @@ export function Promotions() {
             <div className="grid grid-cols-2 gap-4">
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-1">
-                  购买数量
+                  买多少盒
                 </label>
                 <input
                   type="number"
                   min="1"
                   value={formData.buyQuantity}
                   onChange={(e) =>
-                    setFormData({
-                      ...formData,
-                      buyQuantity: parseInt(e.target.value) || 1,
-                    })
+                    setFormData({ ...formData, buyQuantity: e.target.value })
                   }
-                  className="w-full px-4 py-2.5 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all"
+                  className="w-full px-4 py-2.5 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-violet-500/20 focus:border-violet-500 transition-all"
+                  placeholder="2"
                 />
               </div>
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-1">
-                  赠送数量
+                  送多少盒
                 </label>
                 <input
                   type="number"
                   min="1"
                   value={formData.freeQuantity}
                   onChange={(e) =>
-                    setFormData({
-                      ...formData,
-                      freeQuantity: parseInt(e.target.value) || 1,
-                    })
+                    setFormData({ ...formData, freeQuantity: e.target.value })
                   }
-                  className="w-full px-4 py-2.5 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all"
+                  className="w-full px-4 py-2.5 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-violet-500/20 focus:border-violet-500 transition-all"
+                  placeholder="1"
                 />
               </div>
             </div>
           ) : (
             <div>
               <label className="block text-sm font-medium text-slate-700 mb-1">
-                折扣率
+                折扣值（0-10，不包含 0 和 10，9 代表 9 折）
               </label>
-              <div className="flex items-center gap-3">
-                <input
-                  type="range"
-                  min="0.1"
-                  max="0.9"
-                  step="0.1"
-                  value={formData.discount}
-                  onChange={(e) =>
-                    setFormData({ ...formData, discount: parseFloat(e.target.value) })
-                  }
-                  className="flex-1"
-                />
-                <span className="text-lg font-bold text-emerald-600 w-16 text-right">
-                  {(formData.discount * 10).toFixed(1)}折
-                </span>
-              </div>
+              <input
+                type="number"
+                step="0.1"
+                min="0.1"
+                max="9.9"
+                value={formData.discount}
+                onChange={(e) =>
+                  setFormData({ ...formData, discount: e.target.value })
+                }
+                className="w-full px-4 py-2.5 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-violet-500/20 focus:border-violet-500 transition-all"
+                placeholder="9"
+              />
             </div>
           )}
 
@@ -529,7 +578,7 @@ export function Promotions() {
                 onChange={(e) =>
                   setFormData({ ...formData, startDate: e.target.value })
                 }
-                className="w-full px-4 py-2.5 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all"
+                className="w-full px-4 py-2.5 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-violet-500/20 focus:border-violet-500 transition-all"
               />
             </div>
             <div>
@@ -542,37 +591,22 @@ export function Promotions() {
                 onChange={(e) =>
                   setFormData({ ...formData, endDate: e.target.value })
                 }
-                className="w-full px-4 py-2.5 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all"
+                className="w-full px-4 py-2.5 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-violet-500/20 focus:border-violet-500 transition-all"
               />
             </div>
-          </div>
-
-          <div className="flex items-center gap-2">
-            <input
-              type="checkbox"
-              id="isActive"
-              checked={formData.isActive}
-              onChange={(e) =>
-                setFormData({ ...formData, isActive: e.target.checked })
-              }
-              className="w-4 h-4 text-emerald-600 rounded"
-            />
-            <label htmlFor="isActive" className="text-sm text-slate-700">
-              立即使活动生效
-            </label>
           </div>
 
           <div className="flex justify-end gap-3 pt-4">
             <button
               type="button"
-              onClick={closeModal}
+              onClick={handleCloseModal}
               className="px-5 py-2.5 border border-slate-200 text-slate-600 rounded-xl hover:bg-slate-50 transition-colors font-medium text-sm"
             >
               取消
             </button>
             <button
               type="submit"
-              className="px-5 py-2.5 bg-gradient-to-r from-emerald-500 to-teal-600 text-white rounded-xl hover:shadow-lg hover:shadow-emerald-500/30 transition-all font-medium text-sm"
+              className="px-5 py-2.5 bg-gradient-to-r from-violet-500 to-purple-600 text-white rounded-xl hover:shadow-lg hover:shadow-violet-500/30 transition-all font-medium text-sm"
             >
               {editingPromotion ? '保存修改' : '创建活动'}
             </button>

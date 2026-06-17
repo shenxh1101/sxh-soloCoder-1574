@@ -3,15 +3,22 @@ export interface Medicine {
   name: string;
   category: string;
   specification: string;
-  costPrice: number;
   sellPrice: number;
-  stock: number;
   safetyStock: number;
-  productionDate: string;
-  expiryDate: string;
   supplierId: string;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface MedicineBatch {
+  id: string;
+  medicineId: string;
+  batchNo: string;
+  productionDate: string;
+  expiryDate: string;
+  quantity: number;
+  costPrice: number;
+  createdAt: string;
 }
 
 export interface Supplier {
@@ -27,7 +34,9 @@ export interface Supplier {
 export interface SaleRecord {
   id: string;
   medicineId: string;
+  batchId?: string;
   quantity: number;
+  freeQuantity: number;
   unitPrice: number;
   totalAmount: number;
   profit: number;
@@ -38,6 +47,7 @@ export interface SaleRecord {
 export interface StockRecord {
   id: string;
   medicineId: string;
+  batchId?: string;
   quantity: number;
   costPrice: number;
   type: 'in' | 'out';

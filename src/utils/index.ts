@@ -1,7 +1,9 @@
-import type { ExpiryStatus, StockAlertStatus, Promotion } from '@/types';
+import type { ExpiryStatus, StockAlertStatus, Promotion, MedicineBatch } from '@/types';
 
-export function formatDate(date: string | Date): string {
+export function formatDate(date: string | Date | undefined | null): string {
+  if (!date) return '-';
   const d = typeof date === 'string' ? new Date(date) : date;
+  if (isNaN(d.getTime())) return '-';
   const year = d.getFullYear();
   const month = String(d.getMonth() + 1).padStart(2, '0');
   const day = String(d.getDate()).padStart(2, '0');
@@ -22,17 +24,20 @@ export function formatCurrency(amount: number): string {
   return `¥${amount.toFixed(2)}`;
 }
 
-export function getDaysUntilExpiry(expiryDate: string): number {
+export function getDaysUntilExpiry(expiryDate: string | undefined | null): number | null {
+  if (!expiryDate) return null;
+  const expiry = new Date(expiryDate);
+  if (isNaN(expiry.getTime())) return null;
   const today = new Date();
   today.setHours(0, 0, 0, 0);
-  const expiry = new Date(expiryDate);
   expiry.setHours(0, 0, 0, 0);
   const diffTime = expiry.getTime() - today.getTime();
   const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
   return diffDays;
 }
 
-export function getExpiryStatus(daysUntilExpiry: number): ExpiryStatus {
+export function getExpiryStatus(daysUntilExpiry: number | null): ExpiryStatus {
+  if (daysUntilExpiry === null) return 'normal';
   if (daysUntilExpiry < 0) return 'expired';
   if (daysUntilExpiry <= 7) return 'urgent';
   if (daysUntilExpiry <= 30) return 'warning';
@@ -93,6 +98,15 @@ export function generateId(): string {
   return Date.now().toString(36) + Math.random().toString(36).substr(2);
 }
 
+export function generateBatchNo(): string {
+  const now = new Date();
+  const year = now.getFullYear().toString().slice(-2);
+  const month = String(now.getMonth() + 1).padStart(2, '0');
+  const day = String(now.getDate()).padStart(2, '0');
+  const random = Math.floor(Math.random() * 1000).toString().padStart(3, '0');
+  return `B${year}${month}${day}${random}`;
+}
+
 export function isToday(dateString: string): boolean {
   const date = new Date(dateString);
   const today = new Date();
@@ -120,7 +134,6 @@ export function calculatePromotionPrice(
   originalPrice: number
 ): { finalPrice: number; freeQuantity: number; totalQuantity: number } {
   if (promotion.type === 'buy_get_free') {
-    const groupSize = promotion.buyQuantity + promotion.freeQuantity;
     const fullGroups = Math.floor(quantity / promotion.buyQuantity);
     const freeQty = fullGroups * promotion.freeQuantity;
     const totalQty = quantity + freeQty;
@@ -145,4 +158,37 @@ export function isDateInRange(dateStr: string, startStr: string, endStr: string)
   const end = new Date(endStr);
   end.setHours(23, 59, 59, 999);
   return date >= start && date <= end;
+}
+
+export function sortBatchesByExpiry(batches: MedicineBatch[]): MedicineBatch[] {
+  return [...batches].sort((a, b) => {
+    const daysA = getDaysUntilExpiry(a.expiryDate);
+    const daysB = getDaysUntilExpiry(b.expiryDate);
+    if (daysA === null && daysB === null) return 0;
+    if (daysA === null) return 1;
+    if (daysB === null) return -1;
+    return daysA - daysB;
+  });
+}
+
+export function getTotalStock(batches: MedicineBatch[]): number {
+  return batches.reduce((sum, b) => sum + b.quantity, 0);
+}
+
+export function getAverageCostPrice(batches: MedicineBatch[]): number {
+  const total = batches.reduce((sum, b) => sum + b.quantity * b.costPrice, 0);
+  const qty = getTotalStock(batches);
+  return qty > 0 ? total / qty : 0;
+}
+
+export function getEarliestExpiryDate(batches: MedicineBatch[]): string | null {
+  if (batches.length === 0) return null;
+  const sorted = sortBatchesByExpiry(batches);
+  return sorted[0]?.expiryDate || null;
+}
+
+export function isValidDate(dateStr: string): boolean {
+  if (!dateStr) return false;
+  const date = new Date(dateStr);
+  return !isNaN(date.getTime());
 }

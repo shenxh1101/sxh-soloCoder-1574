@@ -6,12 +6,16 @@ import {
   Trash2,
   Filter,
   Pill,
+  PackagePlus,
+  Calendar,
+  CalendarClock,
+  Layers,
 } from 'lucide-react';
 import { useAppStore } from '@/store';
 import { Modal } from '@/components/Modal';
 import { useToast } from '@/components/Toast';
 import { MEDICINE_CATEGORIES } from '@/types';
-import type { Medicine } from '@/types';
+import type { Medicine, MedicineBatch } from '@/types';
 import {
   getDaysUntilExpiry,
   getExpiryStatus,
@@ -19,28 +23,46 @@ import {
   getExpiryStatusColor,
   formatCurrency,
   formatDate,
+  sortBatchesByExpiry,
+  isValidDate,
 } from '@/utils';
 
 export function Medicines() {
-  const { medicines, suppliers, addMedicine, updateMedicine, deleteMedicine } =
-    useAppStore();
+  const {
+    medicines,
+    suppliers,
+    batches,
+    addMedicine,
+    updateMedicine,
+    deleteMedicine,
+    getMedicineStock,
+    getMedicineCostPrice,
+    addBatch,
+  } = useAppStore();
   const toast = useToast();
 
   const [searchTerm, setSearchTerm] = useState('');
   const [categoryFilter, setCategoryFilter] = useState('all');
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [isBatchModalOpen, setIsBatchModalOpen] = useState(false);
+  const [batchModalMedicine, setBatchModalMedicine] = useState<Medicine | null>(null);
   const [editingMedicine, setEditingMedicine] = useState<Medicine | null>(null);
+  const [expandedMedicine, setExpandedMedicine] = useState<string | null>(null);
+
   const [formData, setFormData] = useState({
     name: '',
     category: MEDICINE_CATEGORIES[0],
     specification: '',
-    costPrice: '',
     sellPrice: '',
-    stock: '',
     safetyStock: '10',
+    supplierId: '',
+  });
+
+  const [batchFormData, setBatchFormData] = useState({
     productionDate: '',
     expiryDate: '',
-    supplierId: '',
+    quantity: '',
+    costPrice: '',
   });
 
   const filteredMedicines = useMemo(() => {
@@ -60,12 +82,8 @@ export function Medicines() {
         name: medicine.name,
         category: medicine.category,
         specification: medicine.specification,
-        costPrice: medicine.costPrice.toString(),
         sellPrice: medicine.sellPrice.toString(),
-        stock: medicine.stock.toString(),
         safetyStock: medicine.safetyStock.toString(),
-        productionDate: medicine.productionDate,
-        expiryDate: medicine.expiryDate,
         supplierId: medicine.supplierId,
       });
     } else {
@@ -74,16 +92,23 @@ export function Medicines() {
         name: '',
         category: MEDICINE_CATEGORIES[0],
         specification: '',
-        costPrice: '',
         sellPrice: '',
-        stock: '',
         safetyStock: '10',
-        productionDate: '',
-        expiryDate: '',
         supplierId: suppliers[0]?.id || '',
       });
     }
     setIsModalOpen(true);
+  };
+
+  const handleOpenBatchModal = (medicine: Medicine) => {
+    setBatchModalMedicine(medicine);
+    setBatchFormData({
+      productionDate: '',
+      expiryDate: '',
+      quantity: '',
+      costPrice: getMedicineCostPrice(medicine.id).toString(),
+    });
+    setIsBatchModalOpen(true);
   };
 
   const handleCloseModal = () => {
@@ -91,10 +116,15 @@ export function Medicines() {
     setEditingMedicine(null);
   };
 
+  const handleCloseBatchModal = () => {
+    setIsBatchModalOpen(false);
+    setBatchModalMedicine(null);
+  };
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
 
-    if (!formData.name || !formData.costPrice || !formData.sellPrice || !formData.stock) {
+    if (!formData.name || !formData.sellPrice) {
       toast.error('请填写必填项');
       return;
     }
@@ -103,12 +133,8 @@ export function Medicines() {
       name: formData.name,
       category: formData.category,
       specification: formData.specification,
-      costPrice: parseFloat(formData.costPrice),
       sellPrice: parseFloat(formData.sellPrice),
-      stock: parseInt(formData.stock),
       safetyStock: parseInt(formData.safetyStock) || 10,
-      productionDate: formData.productionDate,
-      expiryDate: formData.expiryDate,
       supplierId: formData.supplierId,
     };
 
@@ -117,14 +143,51 @@ export function Medicines() {
       toast.success('药品信息已更新');
     } else {
       addMedicine(medicineData);
-      toast.success('药品添加成功');
+      toast.success('药品添加成功，请在列表中添加批次入库');
     }
 
     handleCloseModal();
   };
 
+  const handleBatchSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+
+    if (!isValidDate(batchFormData.productionDate)) {
+      toast.error('请选择生产日期');
+      return;
+    }
+    if (!isValidDate(batchFormData.expiryDate)) {
+      toast.error('请选择有效期');
+      return;
+    }
+    if (!batchFormData.quantity || parseInt(batchFormData.quantity) <= 0) {
+      toast.error('请输入入库数量');
+      return;
+    }
+    if (!batchFormData.costPrice || parseFloat(batchFormData.costPrice) <= 0) {
+      toast.error('请输入进价');
+      return;
+    }
+
+    if (new Date(batchFormData.expiryDate) <= new Date(batchFormData.productionDate)) {
+      toast.error('有效期必须晚于生产日期');
+      return;
+    }
+
+    if (batchModalMedicine) {
+      addBatch(batchModalMedicine.id, {
+        productionDate: batchFormData.productionDate,
+        expiryDate: batchFormData.expiryDate,
+        quantity: parseInt(batchFormData.quantity),
+        costPrice: parseFloat(batchFormData.costPrice),
+      });
+      toast.success('入库成功');
+      handleCloseBatchModal();
+    }
+  };
+
   const handleDelete = (id: string) => {
-    if (window.confirm('确定要删除这个药品吗？删除后无法恢复。')) {
+    if (window.confirm('确定要删除这个药品吗？所有批次数据都会被删除。')) {
       deleteMedicine(id);
       toast.success('药品已删除');
     }
@@ -134,12 +197,27 @@ export function Medicines() {
     return suppliers.find((s) => s.id === supplierId)?.name || '-';
   };
 
+  const getMedicineBatches = (medicineId: string): MedicineBatch[] => {
+    return sortBatchesByExpiry(batches.filter((b) => b.medicineId === medicineId));
+  };
+
+  const getEarliestExpiry = (medicineId: string) => {
+    const medBatches = batches.filter(
+      (b) => b.medicineId === medicineId && b.quantity > 0
+    );
+    if (medBatches.length === 0) return null;
+    const sorted = sortBatchesByExpiry(medBatches);
+    return sorted[0];
+  };
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold text-slate-800">药品管理</h1>
-          <p className="text-slate-500 mt-1">管理所有药品信息，共 {medicines.length} 种药品</p>
+          <p className="text-slate-500 mt-1">
+            管理所有药品和批次，共 {medicines.length} 种药品
+          </p>
         </div>
         <button
           onClick={() => handleOpenModal()}
@@ -184,138 +262,223 @@ export function Medicines() {
           </span>
         </div>
 
-        <div className="overflow-x-auto">
-          <table className="w-full">
-            <thead>
-              <tr className="bg-slate-50">
-                <th className="text-left px-5 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">
-                  药品信息
-                </th>
-                <th className="text-left px-5 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">
-                  分类
-                </th>
-                <th className="text-left px-5 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">
-                  库存
-                </th>
-                <th className="text-left px-5 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">
-                  进价/售价
-                </th>
-                <th className="text-left px-5 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">
-                  有效期
-                </th>
-                <th className="text-left px-5 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">
-                  供货商
-                </th>
-                <th className="text-right px-5 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">
-                  操作
-                </th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100">
-              {filteredMedicines.map((med) => {
-                const days = getDaysUntilExpiry(med.expiryDate);
-                const status = getExpiryStatus(days);
-                return (
-                  <tr key={med.id} className="hover:bg-slate-50/50 transition-colors">
-                    <td className="px-5 py-4">
-                      <div className="flex items-center gap-3">
-                      <div className="w-10 h-10 bg-emerald-50 rounded-lg flex items-center justify-center">
-                        <Pill className="w-5 h-5 text-emerald-500" />
+        <div className="divide-y divide-slate-100">
+          {filteredMedicines.length === 0 ? (
+            <div className="text-center py-16">
+              <div className="w-16 h-16 bg-slate-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                <Pill className="w-8 h-8 text-slate-400" />
+              </div>
+              <p className="text-slate-500">暂无药品数据</p>
+            </div>
+          ) : (
+            filteredMedicines.map((med) => {
+              const stock = getMedicineStock(med.id);
+              const costPrice = getMedicineCostPrice(med.id);
+              const earliestBatch = getEarliestExpiry(med.id);
+              const days = earliestBatch
+                ? getDaysUntilExpiry(earliestBatch.expiryDate)
+                : null;
+              const status = earliestBatch
+                ? getExpiryStatus(days)
+                : 'normal';
+              const isExpanded = expandedMedicine === med.id;
+              const medBatches = getMedicineBatches(med.id);
+
+              return (
+                <div key={med.id}>
+                  <div
+                    className="p-5 hover:bg-slate-50/50 transition-colors cursor-pointer"
+                    onClick={() =>
+                      setExpandedMedicine(isExpanded ? null : med.id)
+                    }
+                  >
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-4 flex-1">
+                        <div className="w-10 h-10 bg-emerald-50 rounded-lg flex items-center justify-center flex-shrink-0">
+                          <Pill className="w-5 h-5 text-emerald-500" />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2">
+                            <p className="font-medium text-slate-800">{med.name}</p>
+                            <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-slate-100 text-slate-600">
+                              {med.category}
+                            </span>
+                            {medBatches.length > 0 && (
+                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-sky-50 text-sky-600">
+                                <Layers className="w-3 h-3" />
+                                {medBatches.filter((b) => b.quantity > 0).length} 个批次
+                              </span>
+                            )}
+                          </div>
+                          <p className="text-sm text-slate-500 mt-0.5">
+                            {med.specification} · 供货商: {getSupplierName(med.supplierId)}
+                          </p>
+                        </div>
                       </div>
-                      <div>
-                        <p className="font-medium text-slate-800 text-sm">{med.name}</p>
-                        <p className="text-xs text-slate-500">{med.specification}</p>
+
+                      <div className="flex items-center gap-8">
+                        <div className="text-center">
+                          <p className="text-lg font-bold text-slate-800">{stock}</p>
+                          <p className="text-xs text-slate-500">库存</p>
+                        </div>
+                        <div className="text-center">
+                          <p className="text-sm font-medium text-slate-800">
+                            {formatCurrency(costPrice)}
+                          </p>
+                          <p className="text-xs text-slate-500">均进价</p>
+                        </div>
+                        <div className="text-center">
+                          <p className="text-sm font-medium text-slate-800">
+                            {formatCurrency(med.sellPrice)}
+                          </p>
+                          <p className="text-xs text-slate-500">售价</p>
+                        </div>
+                        <div className="text-center min-w-[100px]">
+                          {earliestBatch ? (
+                            <>
+                              <span
+                                className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium border ${getExpiryStatusColor(
+                                  status
+                                )}`}
+                              >
+                                {getExpiryStatusText(status)}
+                              </span>
+                              <p className="text-xs text-slate-500 mt-1">
+                                {days !== null
+                                  ? days > 0
+                                    ? `最早${days}天后过期`
+                                    : `已过期${Math.abs(days)}天`
+                                  : '-'}
+                              </p>
+                            </>
+                          ) : (
+                            <span className="text-xs text-slate-400">暂无批次</span>
+                          )}
+                        </div>
                       </div>
-                    </div>
-                    </td>
-                    <td className="px-5 py-4">
-                      <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium bg-slate-100 text-slate-600">
-                        {med.category}
-                      </span>
-                    </td>
-                    <td className="px-5 py-4">
-                      <p className="text-sm font-medium text-slate-800">
-                        {med.stock} 盒
-                      </p>
-                      <p className="text-xs text-slate-500">安全库存: {med.safetyStock}</p>
-                    </td>
-                    <td className="px-5 py-4">
-                      <p className="text-sm text-slate-800">
-                        <span className="text-slate-500">进</span> {formatCurrency(med.costPrice)}
-                      </p>
-                      <p className="text-sm text-slate-800">
-                        <span className="text-slate-500">售</span> {formatCurrency(med.sellPrice)}
-                      </p>
-                    </td>
-                    <td className="px-5 py-4">
-                      <span
-                        className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium border ${getExpiryStatusColor(
-                          status
-                        )}`}
-                      >
-                        {getExpiryStatusText(status)}
-                      </span>
-                      <p className="text-xs text-slate-500 mt-1">
-                        至 {formatDate(med.expiryDate)}
-                        {days > 0 ? `（${days}天后过期` : `（已过期${Math.abs(days)}天）`}
-                      </p>
-                    </td>
-                    <td className="px-5 py-4 text-sm text-slate-600">
-                      {getSupplierName(med.supplierId)}
-                    </td>
-                    <td className="px-5 py-4">
-                      <div className="flex items-center justify-end gap-2">
+
+                      <div className="flex items-center gap-1 ml-4">
                         <button
-                          onClick={() => handleOpenModal(med)}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleOpenBatchModal(med);
+                          }}
+                          className="p-2 text-slate-400 hover:text-sky-600 hover:bg-sky-50 rounded-lg transition-colors"
+                          title="入库"
+                        >
+                          <PackagePlus className="w-4 h-4" />
+                        </button>
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleOpenModal(med);
+                          }}
                           className="p-2 text-slate-400 hover:text-emerald-600 hover:bg-emerald-50 rounded-lg transition-colors"
                         >
                           <Edit2 className="w-4 h-4" />
                         </button>
                         <button
-                          onClick={() => handleDelete(med.id)}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleDelete(med.id);
+                          }}
                           className="p-2 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
                         >
                           <Trash2 className="w-4 h-4" />
                         </button>
                       </div>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
+                    </div>
+                  </div>
 
-        {filteredMedicines.length === 0 && (
-          <div className="text-center py-16">
-            <div className="w-16 h-16 bg-slate-100 rounded-full flex items-center justify-center mx-auto mb-4">
-              <Pill className="w-8 h-8 text-slate-400" />
-            </div>
-            <p className="text-slate-500">暂无药品数据</p>
-          </div>
-        )}
+                  {isExpanded && medBatches.length > 0 && (
+                    <div className="bg-slate-50 px-5 pb-4">
+                      <div className="ml-14">
+                        <p className="text-xs font-medium text-slate-500 mb-2 flex items-center gap-1">
+                          <Layers className="w-3.5 h-3.5" />
+                          批次详情（按有效期优先排序，先进先出）
+                        </p>
+                        <div className="grid gap-2">
+                          {medBatches.map((batch) => (
+                            <div
+                              key={batch.id}
+                              className={`flex items-center justify-between p-3 rounded-lg border ${
+                                batch.quantity === 0
+                                  ? 'bg-slate-100 border-slate-200 opacity-60'
+                                  : 'bg-white border-slate-200'
+                              }`}
+                            >
+                              <div className="flex items-center gap-4">
+                                <span className="text-xs font-mono text-slate-500 bg-slate-100 px-2 py-1 rounded">
+                                  {batch.batchNo}
+                                </span>
+                                <div className="flex items-center gap-1 text-xs text-slate-600">
+                                  <Calendar className="w-3.5 h-3.5 text-slate-400" />
+                                  生产: {formatDate(batch.productionDate)}
+                                </div>
+                                <div className="flex items-center gap-1 text-xs text-slate-600">
+                                  <CalendarClock className="w-3.5 h-3.5 text-slate-400" />
+                                  有效期: {formatDate(batch.expiryDate)}
+                                </div>
+                              </div>
+                              <div className="flex items-center gap-6">
+                                <div className="text-right">
+                                  <span className="text-sm font-medium text-slate-700">
+                                    {batch.quantity} 盒
+                                  </span>
+                                  <span className="text-xs text-slate-400 ml-2">
+                                    进价 {formatCurrency(batch.costPrice)}
+                                  </span>
+                                </div>
+                                {batch.quantity > 0 && (
+                                  <span
+                                    className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium border ${getExpiryStatusColor(
+                                      getExpiryStatus(
+                                        getDaysUntilExpiry(batch.expiryDate)
+                                      )
+                                    )}`}
+                                  >
+                                    {getExpiryStatusText(
+                                      getExpiryStatus(
+                                        getDaysUntilExpiry(batch.expiryDate)
+                                      )
+                                    )}
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              );
+            })
+          )}
+        </div>
       </div>
 
       <Modal
         isOpen={isModalOpen}
         onClose={handleCloseModal}
         title={editingMedicine ? '编辑药品' : '添加药品'}
-        size="lg"
+        size="md"
       >
         <form onSubmit={handleSubmit} className="space-y-4">
+          <div>
+            <label className="block text-sm font-medium text-slate-700 mb-1">
+              药品名称 <span className="text-red-500">*</span>
+            </label>
+            <input
+              type="text"
+              value={formData.name}
+              onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+              className="w-full px-4 py-2.5 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all"
+              placeholder="请输入药品名称"
+            />
+          </div>
+
           <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm font-medium text-slate-700 mb-1">
-                药品名称 <span className="text-red-500">*</span>
-              </label>
-              <input
-                type="text"
-                value={formData.name}
-                onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                className="w-full px-4 py-2.5 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all"
-                placeholder="请输入药品名称"
-              />
-            </div>
             <div>
               <label className="block text-sm font-medium text-slate-700 mb-1">
                 分类
@@ -334,39 +497,23 @@ export function Medicines() {
                 ))}
               </select>
             </div>
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium text-slate-700 mb-1">
-              规格
-            </label>
-            <input
-              type="text"
-              value={formData.specification}
-              onChange={(e) =>
-                setFormData({ ...formData, specification: e.target.value })
-              }
-              className="w-full px-4 py-2.5 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all"
-              placeholder="如：0.5g*24片"
-            />
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-1">
+                规格
+              </label>
+              <input
+                type="text"
+                value={formData.specification}
+                onChange={(e) =>
+                  setFormData({ ...formData, specification: e.target.value })
+                }
+                className="w-full px-4 py-2.5 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all"
+                placeholder="如：0.5g*24片"
+              />
+            </div>
           </div>
 
           <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm font-medium text-slate-700 mb-1">
-              进价（元） <span className="text-red-500">*</span>
-            </label>
-            <input
-              type="number"
-              step="0.01"
-              value={formData.costPrice}
-              onChange={(e) =>
-                setFormData({ ...formData, costPrice: e.target.value })
-              }
-              className="w-full px-4 py-2.5 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all"
-              placeholder="0.00"
-            />
-          </div>
             <div>
               <label className="block text-sm font-medium text-slate-700 mb-1">
                 售价（元） <span className="text-red-500">*</span>
@@ -382,21 +529,6 @@ export function Medicines() {
                 placeholder="0.00"
               />
             </div>
-          </div>
-
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm font-medium text-slate-700 mb-1">
-                初始库存（盒） <span className="text-red-500">*</span>
-              </label>
-              <input
-                type="number"
-                value={formData.stock}
-                onChange={(e) => setFormData({ ...formData, stock: e.target.value })}
-                className="w-full px-4 py-2.5 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all"
-                placeholder="0"
-              />
-            </div>
             <div>
               <label className="block text-sm font-medium text-slate-700 mb-1">
                 安全库存（盒）
@@ -409,35 +541,6 @@ export function Medicines() {
                 }
                 className="w-full px-4 py-2.5 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all"
                 placeholder="10"
-              />
-            </div>
-          </div>
-
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm font-medium text-slate-700 mb-1">
-                生产日期
-              </label>
-              <input
-                type="date"
-                value={formData.productionDate}
-                onChange={(e) =>
-                  setFormData({ ...formData, productionDate: e.target.value })
-                }
-                className="w-full px-4 py-2.5 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all"
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-slate-700 mb-1">
-                有效期至
-              </label>
-              <input
-                type="date"
-                value={formData.expiryDate}
-                onChange={(e) =>
-                  setFormData({ ...formData, expiryDate: e.target.value })
-                }
-                className="w-full px-4 py-2.5 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all"
               />
             </div>
           </div>
@@ -461,6 +564,14 @@ export function Medicines() {
             </select>
           </div>
 
+          {!editingMedicine && (
+            <div className="bg-sky-50 border border-sky-200 rounded-xl p-3">
+              <p className="text-xs text-sky-700">
+                💡 添加药品后，点击列表中的「入库」按钮按批次录入生产日期、有效期和数量。
+              </p>
+            </div>
+          )}
+
           <div className="flex justify-end gap-3 pt-4">
             <button
               type="button"
@@ -474,6 +585,110 @@ export function Medicines() {
               className="px-5 py-2.5 bg-gradient-to-r from-emerald-500 to-teal-600 text-white rounded-xl hover:shadow-lg hover:shadow-emerald-500/30 transition-all font-medium text-sm"
             >
               {editingMedicine ? '保存修改' : '添加药品'}
+            </button>
+          </div>
+        </form>
+      </Modal>
+
+      <Modal
+        isOpen={isBatchModalOpen}
+        onClose={handleCloseBatchModal}
+        title={
+          batchModalMedicine
+            ? `${batchModalMedicine.name} - 批次入库`
+            : '批次入库'
+        }
+        size="md"
+      >
+        <form onSubmit={handleBatchSubmit} className="space-y-4">
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-1">
+                生产日期 <span className="text-red-500">*</span>
+              </label>
+              <input
+                type="date"
+                value={batchFormData.productionDate}
+                onChange={(e) =>
+                  setBatchFormData({
+                    ...batchFormData,
+                    productionDate: e.target.value,
+                  })
+                }
+                className="w-full px-4 py-2.5 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-1">
+                有效期至 <span className="text-red-500">*</span>
+              </label>
+              <input
+                type="date"
+                value={batchFormData.expiryDate}
+                onChange={(e) =>
+                  setBatchFormData({
+                    ...batchFormData,
+                    expiryDate: e.target.value,
+                  })
+                }
+                className="w-full px-4 py-2.5 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all"
+              />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-1">
+                入库数量（盒） <span className="text-red-500">*</span>
+              </label>
+              <input
+                type="number"
+                min="1"
+                value={batchFormData.quantity}
+                onChange={(e) =>
+                  setBatchFormData({ ...batchFormData, quantity: e.target.value })
+                }
+                className="w-full px-4 py-2.5 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all"
+                placeholder="0"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-1">
+                进价（元/盒） <span className="text-red-500">*</span>
+              </label>
+              <input
+                type="number"
+                step="0.01"
+                min="0.01"
+                value={batchFormData.costPrice}
+                onChange={(e) =>
+                  setBatchFormData({ ...batchFormData, costPrice: e.target.value })
+                }
+                className="w-full px-4 py-2.5 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all"
+                placeholder="0.00"
+              />
+            </div>
+          </div>
+
+          <div className="bg-amber-50 border border-amber-200 rounded-xl p-3">
+            <p className="text-xs text-amber-700">
+              ⚠️ 生产日期和有效期必须准确填写，系统将据此计算过期预警。
+            </p>
+          </div>
+
+          <div className="flex justify-end gap-3 pt-4">
+            <button
+              type="button"
+              onClick={handleCloseBatchModal}
+              className="px-5 py-2.5 border border-slate-200 text-slate-600 rounded-xl hover:bg-slate-50 transition-colors font-medium text-sm"
+            >
+              取消
+            </button>
+            <button
+              type="submit"
+              className="px-5 py-2.5 bg-gradient-to-r from-sky-500 to-blue-600 text-white rounded-xl hover:shadow-lg hover:shadow-sky-500/30 transition-all font-medium text-sm"
+            >
+              确认入库
             </button>
           </div>
         </form>

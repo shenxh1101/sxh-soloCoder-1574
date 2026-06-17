@@ -2,30 +2,60 @@ import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import type {
   Medicine,
+  MedicineBatch,
   Supplier,
   SaleRecord,
   StockRecord,
   Promotion,
 } from '@/types';
-import { generateId, isPromotionActive, calculatePromotionPrice } from '@/utils';
+import {
+  generateId,
+  generateBatchNo,
+  isPromotionActive,
+  calculatePromotionPrice,
+  sortBatchesByExpiry,
+  getTotalStock,
+  getAverageCostPrice,
+  formatDate,
+} from '@/utils';
 
 interface AppState {
   medicines: Medicine[];
+  batches: MedicineBatch[];
   suppliers: Supplier[];
   saleRecords: SaleRecord[];
   stockRecords: StockRecord[];
   promotions: Promotion[];
 
-  addMedicine: (medicine: Omit<Medicine, 'id' | 'createdAt' | 'updatedAt'>) => void;
+  addMedicine: (
+    medicine: Omit<Medicine, 'id' | 'createdAt' | 'updatedAt'>,
+    initialBatch?: Omit<MedicineBatch, 'id' | 'medicineId' | 'batchNo' | 'createdAt'>
+  ) => void;
   updateMedicine: (id: string, medicine: Partial<Medicine>) => void;
   deleteMedicine: (id: string) => void;
+  getMedicineBatches: (medicineId: string) => MedicineBatch[];
+  getMedicineStock: (medicineId: string) => number;
+  getMedicineCostPrice: (medicineId: string) => number;
 
   addSupplier: (supplier: Omit<Supplier, 'id' | 'createdAt'>) => void;
   updateSupplier: (id: string, supplier: Partial<Supplier>) => void;
   deleteSupplier: (id: string) => void;
 
-  addStockIn: (medicineId: string, quantity: number, costPrice: number, remark?: string) => void;
-  addSale: (medicineId: string, quantity: number, unitPrice?: number, promotionId?: string) => boolean;
+  addBatch: (
+    medicineId: string,
+    batchData: Omit<MedicineBatch, 'id' | 'medicineId' | 'batchNo' | 'createdAt'>
+  ) => void;
+
+  addSale: (
+    medicineId: string,
+    quantity: number,
+    unitPrice?: number,
+    promotionId?: string
+  ) => {
+    success: boolean;
+    message?: string;
+    usedBatches?: { batchId: string; quantity: number }[];
+  };
 
   addPromotion: (promotion: Omit<Promotion, 'id' | 'createdAt'>) => void;
   updatePromotion: (id: string, promotion: Partial<Promotion>) => void;
@@ -33,6 +63,13 @@ interface AppState {
   togglePromotionActive: (id: string) => void;
 
   getActivePromotion: (medicineId: string) => Promotion | null;
+  getReplenishmentList: () => {
+    medicine: Medicine;
+    supplier: Supplier;
+    currentStock: number;
+    safetyStock: number;
+    suggestedQuantity: number;
+  }[];
 }
 
 const initialMedicines: Medicine[] = [
@@ -41,12 +78,8 @@ const initialMedicines: Medicine[] = [
     name: '感冒灵颗粒',
     category: '感冒药',
     specification: '10g*9袋',
-    costPrice: 8.5,
     sellPrice: 15.8,
-    stock: 45,
     safetyStock: 20,
-    productionDate: '2025-03-15',
-    expiryDate: '2026-09-14',
     supplierId: 'sup_001',
     createdAt: '2025-06-01T08:00:00Z',
     updatedAt: '2025-06-01T08:00:00Z',
@@ -56,12 +89,8 @@ const initialMedicines: Medicine[] = [
     name: '硝苯地平缓释片',
     category: '降压药',
     specification: '10mg*30片',
-    costPrice: 12.0,
     sellPrice: 22.5,
-    stock: 8,
     safetyStock: 15,
-    productionDate: '2025-01-20',
-    expiryDate: '2026-07-19',
     supplierId: 'sup_002',
     createdAt: '2025-06-01T08:00:00Z',
     updatedAt: '2025-06-01T08:00:00Z',
@@ -71,12 +100,8 @@ const initialMedicines: Medicine[] = [
     name: '阿莫西林胶囊',
     category: '消炎药',
     specification: '0.25g*24粒',
-    costPrice: 6.8,
     sellPrice: 12.0,
-    stock: 3,
     safetyStock: 10,
-    productionDate: '2025-04-10',
-    expiryDate: '2026-06-25',
     supplierId: 'sup_001',
     createdAt: '2025-06-01T08:00:00Z',
     updatedAt: '2025-06-01T08:00:00Z',
@@ -86,12 +111,8 @@ const initialMedicines: Medicine[] = [
     name: '维生素C片',
     category: '维生素',
     specification: '100mg*100片',
-    costPrice: 5.0,
     sellPrice: 9.9,
-    stock: 120,
     safetyStock: 30,
-    productionDate: '2025-02-28',
-    expiryDate: '2027-02-27',
     supplierId: 'sup_003',
     createdAt: '2025-06-01T08:00:00Z',
     updatedAt: '2025-06-01T08:00:00Z',
@@ -101,12 +122,8 @@ const initialMedicines: Medicine[] = [
     name: '布洛芬缓释胶囊',
     category: '止痛药',
     specification: '0.3g*20粒',
-    costPrice: 10.5,
     sellPrice: 18.8,
-    stock: 25,
     safetyStock: 15,
-    productionDate: '2025-05-01',
-    expiryDate: '2026-12-30',
     supplierId: 'sup_002',
     createdAt: '2025-06-01T08:00:00Z',
     updatedAt: '2025-06-01T08:00:00Z',
@@ -116,15 +133,84 @@ const initialMedicines: Medicine[] = [
     name: '奥美拉唑肠溶胶囊',
     category: '胃药',
     specification: '20mg*14粒',
-    costPrice: 15.0,
     sellPrice: 28.0,
-    stock: 50,
     safetyStock: 20,
-    productionDate: '2025-03-08',
-    expiryDate: '2026-08-07',
     supplierId: 'sup_003',
     createdAt: '2025-06-01T08:00:00Z',
     updatedAt: '2025-06-01T08:00:00Z',
+  },
+];
+
+const initialBatches: MedicineBatch[] = [
+  {
+    id: 'bat_001',
+    medicineId: 'med_001',
+    batchNo: 'B250315001',
+    productionDate: '2025-03-15',
+    expiryDate: '2026-09-14',
+    quantity: 30,
+    costPrice: 8.5,
+    createdAt: '2025-06-01T08:00:00Z',
+  },
+  {
+    id: 'bat_002',
+    medicineId: 'med_001',
+    batchNo: 'B250510002',
+    productionDate: '2025-05-10',
+    expiryDate: '2026-12-09',
+    quantity: 15,
+    costPrice: 8.2,
+    createdAt: '2025-06-01T08:00:00Z',
+  },
+  {
+    id: 'bat_003',
+    medicineId: 'med_002',
+    batchNo: 'B250120001',
+    productionDate: '2025-01-20',
+    expiryDate: '2026-07-19',
+    quantity: 8,
+    costPrice: 12.0,
+    createdAt: '2025-06-01T08:00:00Z',
+  },
+  {
+    id: 'bat_004',
+    medicineId: 'med_003',
+    batchNo: 'B250410001',
+    productionDate: '2025-04-10',
+    expiryDate: '2026-06-25',
+    quantity: 3,
+    costPrice: 6.8,
+    createdAt: '2025-06-01T08:00:00Z',
+  },
+  {
+    id: 'bat_005',
+    medicineId: 'med_004',
+    batchNo: 'B250228001',
+    productionDate: '2025-02-28',
+    expiryDate: '2027-02-27',
+    quantity: 120,
+    costPrice: 5.0,
+    createdAt: '2025-06-01T08:00:00Z',
+  },
+  {
+    id: 'bat_006',
+    medicineId: 'med_005',
+    batchNo: 'B250501001',
+    productionDate: '2025-05-01',
+    expiryDate: '2026-12-30',
+    quantity: 25,
+    costPrice: 10.5,
+    createdAt: '2025-06-01T08:00:00Z',
+  },
+  {
+    id: 'bat_007',
+    medicineId: 'med_006',
+    batchNo: 'B250308001',
+    productionDate: '2025-03-08',
+    expiryDate: '2026-08-07',
+    quantity: 50,
+    costPrice: 15.0,
+    createdAt: '2025-06-01T08:00:00Z',
   },
 ];
 
@@ -158,10 +244,6 @@ const initialSuppliers: Supplier[] = [
   },
 ];
 
-const initialSales: SaleRecord[] = [];
-
-const initialStockRecords: StockRecord[] = [];
-
 const initialPromotions: Promotion[] = [
   {
     id: 'promo_001',
@@ -182,21 +264,71 @@ export const useAppStore = create<AppState>()(
   persist(
     (set, get) => ({
       medicines: initialMedicines,
+      batches: initialBatches,
       suppliers: initialSuppliers,
-      saleRecords: initialSales,
-      stockRecords: initialStockRecords,
+      saleRecords: [],
+      stockRecords: [],
       promotions: initialPromotions,
 
-      addMedicine: (medicine) => {
+      getMedicineBatches: (medicineId) => {
+        return get().batches.filter((b) => b.medicineId === medicineId && b.quantity > 0);
+      },
+
+      getMedicineStock: (medicineId) => {
+        const batches = get().batches.filter((b) => b.medicineId === medicineId);
+        return getTotalStock(batches);
+      },
+
+      getMedicineCostPrice: (medicineId) => {
+        const batches = get().batches.filter(
+          (b) => b.medicineId === medicineId && b.quantity > 0
+        );
+        return getAverageCostPrice(batches);
+      },
+
+      addMedicine: (medicine, initialBatch) => {
         const now = new Date().toISOString();
+        const medicineId = generateId();
         const newMedicine: Medicine = {
           ...medicine,
-          id: generateId(),
+          id: medicineId,
           createdAt: now,
           updatedAt: now,
         };
+
+        const newBatches: MedicineBatch[] = [];
+        const newStockRecords: StockRecord[] = [];
+
+        if (initialBatch && initialBatch.quantity > 0) {
+          const batch: MedicineBatch = {
+            id: generateId(),
+            medicineId,
+            batchNo: generateBatchNo(),
+            productionDate: initialBatch.productionDate,
+            expiryDate: initialBatch.expiryDate,
+            quantity: initialBatch.quantity,
+            costPrice: initialBatch.costPrice,
+            createdAt: now,
+          };
+          newBatches.push(batch);
+
+          const stockRecord: StockRecord = {
+            id: generateId(),
+            medicineId,
+            batchId: batch.id,
+            quantity: initialBatch.quantity,
+            costPrice: initialBatch.costPrice,
+            type: 'in',
+            operationTime: now,
+            remark: '初始入库',
+          };
+          newStockRecords.push(stockRecord);
+        }
+
         set((state) => ({
           medicines: [...state.medicines, newMedicine],
+          batches: [...state.batches, ...newBatches],
+          stockRecords: [...state.stockRecords, ...newStockRecords],
         }));
       },
 
@@ -212,6 +344,7 @@ export const useAppStore = create<AppState>()(
       deleteMedicine: (id) => {
         set((state) => ({
           medicines: state.medicines.filter((m) => m.id !== id),
+          batches: state.batches.filter((b) => b.medicineId !== id),
         }));
       },
 
@@ -241,93 +374,135 @@ export const useAppStore = create<AppState>()(
         }));
       },
 
-      addStockIn: (medicineId, quantity, costPrice, remark) => {
+      addBatch: (medicineId, batchData) => {
         const now = new Date().toISOString();
+        const batch: MedicineBatch = {
+          id: generateId(),
+          medicineId,
+          batchNo: generateBatchNo(),
+          productionDate: batchData.productionDate,
+          expiryDate: batchData.expiryDate,
+          quantity: batchData.quantity,
+          costPrice: batchData.costPrice,
+          createdAt: now,
+        };
+
         const stockRecord: StockRecord = {
           id: generateId(),
           medicineId,
-          quantity,
-          costPrice,
+          batchId: batch.id,
+          quantity: batchData.quantity,
+          costPrice: batchData.costPrice,
           type: 'in',
           operationTime: now,
-          remark,
+          remark: batchData.productionDate ? `批次入库` : '入库',
         };
 
-        set((state) => {
-          const medicine = state.medicines.find((m) => m.id === medicineId);
-          if (!medicine) return state;
-
-          const updatedMedicines = state.medicines.map((m) =>
-            m.id === medicineId
-              ? {
-                  ...m,
-                  stock: m.stock + quantity,
-                  costPrice: costPrice,
-                  updatedAt: now,
-                }
-              : m
-          );
-
-          return {
-            medicines: updatedMedicines,
-            stockRecords: [...state.stockRecords, stockRecord],
-          };
-        });
+        set((state) => ({
+          batches: [...state.batches, batch],
+          stockRecords: [...state.stockRecords, stockRecord],
+        }));
       },
 
       addSale: (medicineId, quantity, unitPrice, promotionId) => {
         const state = get();
         const medicine = state.medicines.find((m) => m.id === medicineId);
-        if (!medicine || medicine.stock < quantity) return false;
+        if (!medicine) return { success: false, message: '药品不存在' };
 
-        const now = new Date().toISOString();
-        const price = unitPrice ?? medicine.sellPrice;
-        let totalAmount = price * quantity;
-        let profit = (price - medicine.costPrice) * quantity;
+        const medicineBatches = state.batches.filter(
+          (b) => b.medicineId === medicineId && b.quantity > 0
+        );
+        const totalStock = getTotalStock(medicineBatches);
+
+        let actualPrice = unitPrice ?? medicine.sellPrice;
+        let totalAmount = actualPrice * quantity;
         let finalPromotionId = promotionId;
+        let freeQty = 0;
 
         if (!finalPromotionId) {
-          const activePromo = get().getActivePromotion(medicineId);
+          const activePromo = state.getActivePromotion(medicineId);
           if (activePromo) {
             finalPromotionId = activePromo.id;
-            const promoResult = calculatePromotionPrice(activePromo, quantity, price);
+            const promoResult = calculatePromotionPrice(activePromo, quantity, actualPrice);
             totalAmount = promoResult.finalPrice;
-            profit = promoResult.finalPrice - medicine.costPrice * quantity;
+            freeQty = promoResult.freeQuantity;
           }
         }
 
-        const saleRecord: SaleRecord = {
-          id: generateId(),
-          medicineId,
-          quantity,
-          unitPrice: price,
-          totalAmount,
-          profit,
-          promotionId: finalPromotionId,
-          saleTime: now,
-        };
+        const totalDeductQty = quantity + freeQty;
 
-        const stockRecord: StockRecord = {
+        if (totalStock < totalDeductQty) {
+          return { success: false, message: `库存不足，当前库存${totalStock}盒` };
+        }
+
+        const now = new Date().toISOString();
+        const sortedBatches = sortBatchesByExpiry(medicineBatches);
+
+        let remainingQty = totalDeductQty;
+        const usedBatches: { batchId: string; quantity: number; costPrice: number }[] = [];
+        let totalCost = 0;
+
+        for (const batch of sortedBatches) {
+          if (remainingQty <= 0) break;
+          const deductQty = Math.min(batch.quantity, remainingQty);
+          usedBatches.push({
+            batchId: batch.id,
+            quantity: deductQty,
+            costPrice: batch.costPrice,
+          });
+          totalCost += deductQty * batch.costPrice;
+          remainingQty -= deductQty;
+        }
+
+        const profit = totalAmount - totalCost;
+
+        const newSaleRecords: SaleRecord[] = usedBatches.map((ub) => {
+          const qtyRatio = ub.quantity / totalDeductQty;
+          return {
+            id: generateId(),
+            medicineId,
+            batchId: ub.batchId,
+            quantity: Math.round(quantity * qtyRatio * 100) / 100,
+            freeQuantity: Math.round(freeQty * qtyRatio * 100) / 100,
+            unitPrice: actualPrice,
+            totalAmount: Math.round(totalAmount * qtyRatio * 100) / 100,
+            profit: Math.round(profit * qtyRatio * 100) / 100,
+            promotionId: finalPromotionId,
+            saleTime: now,
+          };
+        });
+
+        const newStockRecords: StockRecord[] = usedBatches.map((ub) => ({
           id: generateId(),
           medicineId,
-          quantity: -quantity,
-          costPrice: medicine.costPrice,
+          batchId: ub.batchId,
+          quantity: -ub.quantity,
+          costPrice: ub.costPrice,
           type: 'out',
           operationTime: now,
-          remark: '销售出库',
-        };
-
-        set((state) => ({
-          saleRecords: [...state.saleRecords, saleRecord],
-          stockRecords: [...state.stockRecords, stockRecord],
-          medicines: state.medicines.map((m) =>
-            m.id === medicineId
-              ? { ...m, stock: m.stock - quantity, updatedAt: now }
-              : m
-          ),
+          remark: freeQty > 0 ? `销售出库（含赠送${freeQty}盒）` : '销售出库',
         }));
 
-        return true;
+        const updatedBatches = state.batches.map((b) => {
+          const used = usedBatches.find((ub) => ub.batchId === b.id);
+          if (used) {
+            return { ...b, quantity: b.quantity - used.quantity };
+          }
+          return b;
+        });
+
+        const finalUsedBatches = usedBatches.map((ub) => ({
+          batchId: ub.batchId,
+          quantity: ub.quantity,
+        }));
+
+        set((state) => ({
+          batches: updatedBatches,
+          saleRecords: [...state.saleRecords, ...newSaleRecords],
+          stockRecords: [...state.stockRecords, ...newStockRecords],
+        }));
+
+        return { success: true, usedBatches: finalUsedBatches };
       },
 
       addPromotion: (promotion) => {
@@ -371,9 +546,42 @@ export const useAppStore = create<AppState>()(
         );
         return activePromotions.find((p) => isPromotionActive(p)) || null;
       },
+
+      getReplenishmentList: () => {
+        const state = get();
+        const result: {
+          medicine: Medicine;
+          supplier: Supplier;
+          currentStock: number;
+          safetyStock: number;
+          suggestedQuantity: number;
+        }[] = [];
+
+        state.medicines.forEach((med) => {
+          const currentStock = state.getMedicineStock(med.id);
+          if (currentStock <= med.safetyStock) {
+            const supplier = state.suppliers.find((s) => s.id === med.supplierId);
+            if (supplier) {
+              const suggested = Math.max(
+                med.safetyStock * 2 - currentStock,
+                med.safetyStock - currentStock + 10
+              );
+              result.push({
+                medicine: med,
+                supplier,
+                currentStock,
+                safetyStock: med.safetyStock,
+                suggestedQuantity: suggested,
+              });
+            }
+          }
+        });
+
+        return result.sort((a, b) => a.currentStock - b.currentStock);
+      },
     }),
     {
-      name: 'pharmacy-store',
+      name: 'pharmacy-store-v2',
     }
   )
 );
