@@ -88,6 +88,15 @@ interface AppState {
     items: { medicineId: string; batchId: string; actualQuantity: number }[];
     remark?: string;
   }) => string;
+  updateStockCheck: (
+    checkId: string,
+    data: {
+      title?: string;
+      items?: { medicineId: string; batchId: string; actualQuantity: number }[];
+      remark?: string;
+    }
+  ) => boolean;
+  deleteStockCheck: (checkId: string) => boolean;
   confirmStockCheck: (checkId: string) => boolean;
   getStockChecks: () => StockCheck[];
 
@@ -716,6 +725,74 @@ export const useAppStore = create<AppState>()(
         }));
 
         return checkId;
+      },
+
+      updateStockCheck: (checkId, data) => {
+        const state = get();
+        const stockCheck = state.stockChecks.find((c) => c.id === checkId);
+        if (!stockCheck || stockCheck.status !== 'draft') return false;
+
+        const updatedItems = data.items
+          ? data.items.map((item) => {
+              const batch = state.batches.find((b) => b.id === item.batchId);
+              const systemQuantity = batch?.quantity || 0;
+              const costPrice = batch?.costPrice || 0;
+              const difference = item.actualQuantity - systemQuantity;
+              const existingItem = stockCheck.items.find(
+                (i) => i.batchId === item.batchId
+              );
+              return {
+                id: existingItem?.id || generateId(),
+                checkId,
+                medicineId: item.medicineId,
+                batchId: item.batchId,
+                systemQuantity,
+                actualQuantity: item.actualQuantity,
+                difference,
+                costPrice,
+              };
+            })
+          : stockCheck.items;
+
+        const totalDifference = updatedItems.reduce(
+          (sum, item) => sum + item.difference,
+          0
+        );
+        const totalDiffAmount = updatedItems.reduce(
+          (sum, item) => sum + item.difference * item.costPrice,
+          0
+        );
+
+        const updatedStockChecks = state.stockChecks.map((c) =>
+          c.id === checkId
+            ? {
+                ...c,
+                title: data.title !== undefined ? data.title : c.title,
+                remark: data.remark !== undefined ? data.remark : c.remark,
+                items: updatedItems,
+                totalDifference,
+                totalDiffAmount,
+              }
+            : c
+        );
+
+        set((state) => ({
+          stockChecks: updatedStockChecks,
+        }));
+
+        return true;
+      },
+
+      deleteStockCheck: (checkId) => {
+        const state = get();
+        const stockCheck = state.stockChecks.find((c) => c.id === checkId);
+        if (!stockCheck || stockCheck.status !== 'draft') return false;
+
+        set((state) => ({
+          stockChecks: state.stockChecks.filter((c) => c.id !== checkId),
+        }));
+
+        return true;
       },
 
       confirmStockCheck: (checkId) => {
